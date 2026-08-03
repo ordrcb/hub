@@ -1,0 +1,2139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OrderCube Hub</title>
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  color-scheme:light;
+  --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --border:rgba(11,11,11,.10); --accent:#2a78d6;
+  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b; --goodtext:#006300;
+  --f1:#86b6ef; --f2:#5598e7; --f3:#2a78d6; --f4:#1c5cab; --f5:#0d366b; --fgray:#c3c2b7;
+  --chipbg:#f0efec;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --border:rgba(255,255,255,.10); --accent:#3987e5;
+    --goodtext:#0ca30c; --f1:#9ec5f4; --f2:#6da7ec; --f3:#3987e5; --f4:#256abf; --f5:#184f95; --fgray:#52514e;
+    --chipbg:#262624;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --border:rgba(255,255,255,.10); --accent:#3987e5;
+  --goodtext:#0ca30c; --f1:#9ec5f4; --f2:#6da7ec; --f3:#3987e5; --f4:#256abf; --f5:#184f95; --fgray:#52514e;
+  --chipbg:#262624;
+}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--page);color:var(--ink)}
+a{color:var(--accent);text-decoration:none}
+.layout{display:none;min-height:100vh}
+nav{width:210px;flex:none;border-right:1px solid var(--border);padding:16px 10px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column}
+.brand{font-weight:700;font-size:16px;padding:6px 10px 14px}
+.brand small{display:block;font-weight:400;color:var(--muted);font-size:11px}
+.navbtn{display:flex;justify-content:space-between;align-items:center;width:100%;border:0;background:none;color:var(--ink2);
+  padding:9px 10px;border-radius:8px;font:inherit;cursor:pointer;text-align:left}
+.navbtn:hover{background:var(--chipbg)}
+.navbtn.active{background:var(--chipbg);color:var(--ink);font-weight:600}
+.navbtn .cnt{font-size:11px;background:var(--surface);border:1px solid var(--border);border-radius:99px;padding:1px 7px;color:var(--ink2)}
+.navfoot{margin-top:auto;padding:10px;font-size:11px;color:var(--muted)}
+.navfoot a{cursor:pointer}
+main{flex:1;padding:20px 24px;max-width:1060px}
+header.top{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+header.top h1{font-size:18px;margin:0}
+.search{flex:1;min-width:180px;max-width:340px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit}
+.stamp{font-size:12px;color:var(--muted)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px}
+.tile{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+.tile .v{font-size:26px;font-weight:700}
+.tile .l{font-size:12px;color:var(--ink2)}
+.tile .s{font-size:11px;color:var(--muted)}
+h2{font-size:15px;margin:22px 0 8px}
+h2:first-child{margin-top:0}
+#content h2.foldable{cursor:pointer;user-select:none}
+#content h2.foldable::before{content:"▾ ";color:var(--muted)}
+#content h2.foldable.folded::before{content:"▸ "}
+#content h2.foldable:hover{color:var(--accent)}
+.hint{font-size:12px;color:var(--muted);margin:0 0 10px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:8px}
+.row{display:flex;gap:10px;align-items:center;padding:10px 12px;cursor:pointer;flex-wrap:wrap}
+.row .who{flex:1;min-width:160px}
+.row .who .nm{font-weight:600}
+.row .who .co{color:var(--ink2);font-size:12px}
+.chip{font-size:11px;padding:2px 8px;border-radius:99px;background:var(--chipbg);color:var(--ink2);white-space:nowrap}
+.chip.coupon{background:color-mix(in srgb,var(--warn) 18%,var(--surface));color:var(--ink)}
+.chip.call{background:color-mix(in srgb,var(--accent) 15%,var(--surface));color:var(--ink)}
+.chip.stage{border:1px solid var(--border);background:var(--surface)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px}
+.ok .dot{background:var(--good)} .no .dot{background:var(--fgray)}
+.tz{font-size:11px;color:var(--muted);white-space:nowrap}
+.meta{font-size:11px;color:var(--muted);white-space:nowrap}
+.detail .meta{white-space:normal;overflow-wrap:anywhere}
+.detail{overflow:hidden}
+.meta.due{color:var(--crit);font-weight:600}
+.meta.quiet{color:var(--serious);font-weight:600}
+.badge-t{font-size:11px;border:1px solid var(--border);border-radius:99px;padding:1px 7px;color:var(--ink2)}
+.detail{display:none;border-top:1px solid var(--grid);padding:12px;gap:10px}
+.card.open .detail{display:flex;flex-wrap:wrap}
+.detail .acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btn{border:1px solid var(--border);background:var(--surface);color:var(--ink);padding:6px 11px;border-radius:8px;font:inherit;font-size:13px;cursor:pointer}
+.btn:hover{background:var(--chipbg)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+select.st,textarea.note,input.li{font:inherit;font-size:13px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);padding:6px 8px}
+textarea.note{width:100%;min-height:34px;resize:vertical}
+.notelog{display:flex;flex-direction:column;gap:4px;max-height:140px;overflow-y:auto}
+.noteitem{font-size:12.5px;border-left:2px solid var(--grid);padding:2px 8px;color:var(--ink2)}
+.noteitem.tout{border-left-color:var(--accent)}
+#mergeov{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:50}
+.mcard{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;width:420px;max-width:min(96vw,620px);max-height:90vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+.mcard .li{width:100%;min-width:0}
+.mcard .acts{gap:8px;flex-wrap:wrap;align-items:center}
+.mcard .acts .li{width:auto;flex:1 1 120px}
+.mcard .acts .st{flex:0 1 auto;max-width:100%}
+.mcard label.chip{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.mcard h3{margin:0;font-size:14px}
+.mhit{padding:8px 10px;border-radius:8px;cursor:pointer;border:1px solid var(--grid);margin-top:4px;font-size:13px}
+.mhit:hover{background:var(--chipbg)}
+.noteitem .meta{margin-right:6px}
+.detail .left{flex:1;min-width:230px}
+.detail .savenote{font-size:11px;color:var(--goodtext);visibility:hidden}
+.bars{display:flex;flex-direction:column;gap:8px;margin:10px 0 4px}
+.bar{display:grid;grid-template-columns:110px 1fr;gap:10px;align-items:center}
+.bar .lb{font-size:12px;color:var(--ink2);text-align:right}
+.bar .tr{background:none;height:22px;position:relative}
+.bar .fl{height:100%;border-radius:0 4px 4px 0;min-width:2px}
+.bar .vl{position:absolute;left:calc(var(--w) + 8px);top:0;line-height:22px;font-size:12px;color:var(--ink2)}
+.note-banner{border:1px solid var(--border);border-left:3px solid var(--warn);background:var(--surface);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--ink2);margin-bottom:12px}
+.filters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.fbtn{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:99px;padding:5px 12px;font:inherit;font-size:12px;cursor:pointer}
+.fbtn.active{background:var(--ink);color:var(--page);border-color:var(--ink)}
+details.tbl{margin-top:10px}
+details.tbl summary{font-size:12px;color:var(--muted);cursor:pointer}
+table{border-collapse:collapse;margin-top:8px;font-variant-numeric:tabular-nums}
+td,th{border-bottom:1px solid var(--grid);padding:5px 12px 5px 0;text-align:left;font-size:12px}
+th{color:var(--muted);font-weight:500}
+.empty{border:1px dashed var(--grid);border-radius:10px;padding:26px;text-align:center;color:var(--muted);font-size:13px}
+.empty b{color:var(--ink2)}
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--page);
+  padding:8px 18px;border-radius:99px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:99}
+#toast.show{opacity:1}
+.tile.click{cursor:pointer}
+.tile.click:hover{border-color:var(--accent)}
+.sflink{font-size:11px;white-space:nowrap}
+.tdel{border:0;background:none;cursor:pointer;font-size:11px;opacity:.45;padding:0 3px}
+.tdel:hover{opacity:1}
+.qwrap{position:relative;flex:1;min-width:180px;max-width:340px}
+.qwrap .search{width:100%;max-width:none;padding-right:30px}
+#qclear{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--muted);cursor:pointer;font-size:13px;padding:4px}
+#qclear:hover{color:var(--ink)}
+#qdrop{position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--surface);border:1px solid var(--border);
+  border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:60;max-height:60vh;overflow-y:auto}
+.qhit{display:flex;gap:8px;align-items:center;padding:8px 12px;cursor:pointer;font-size:13px}
+.qhit:hover{background:var(--chipbg)}
+.qhit .tag{font-size:10px;border:1px solid var(--border);border-radius:99px;padding:1px 7px;color:var(--muted);white-space:nowrap;flex:none}
+.errbar{border:1px solid var(--crit);border-left:4px solid var(--crit);background:var(--surface);border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:12px}
+.errbar code{font-size:11px;color:var(--muted);display:block;margin-top:4px;overflow-wrap:anywhere;max-height:120px;overflow-y:auto}
+.phead{width:100%;display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding-bottom:8px;border-bottom:1px dashed var(--grid)}
+.phead .chip.jump{cursor:pointer}
+.phead .chip.jump:hover{border-color:var(--accent);color:var(--accent)}
+.chip.life-client{background:color-mix(in srgb,var(--good) 16%,var(--surface));color:var(--ink)}
+.chip.life-lead{background:color-mix(in srgb,var(--accent) 13%,var(--surface));color:var(--ink)}
+.chip.asg{background:color-mix(in srgb,var(--accent) 15%,var(--surface));color:var(--ink)}
+details.snip{display:inline}
+details.snip summary{cursor:pointer;list-style:none;display:inline}
+details.snip summary::-webkit-details-marker{display:none}
+details.snip summary:hover{color:var(--accent)}
+details.snip .body{margin:4px 0;padding:6px 8px;background:var(--chipbg);border-radius:6px;font-size:12px;white-space:pre-wrap;color:var(--ink2)}
+/* login */
+#login{min-height:100vh;display:flex;align-items:center;justify-content:center}
+.logincard{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px;width:320px;display:flex;flex-direction:column;gap:10px}
+.logincard h1{font-size:17px;margin:0 0 4px}
+.logincard .err{color:var(--crit);font-size:12px;min-height:16px}
+#loading{position:fixed;inset:0;display:none;align-items:center;justify-content:center;color:var(--muted);font-size:13px}
+@media (max-width:760px){
+  .layout{flex-direction:column} nav{width:auto;height:auto;position:static;display:flex;flex-direction:row;overflow-x:auto;padding:8px}
+  .brand,.navfoot{display:none} .navbtn{white-space:nowrap} main{padding:14px}
+}
+</style>
+</head>
+<body>
+<div id="login">
+  <form class="logincard" onsubmit="doLogin(event)">
+    <h1>OrderCube Hub</h1>
+    <input class="li" type="email" id="lemail" placeholder="Email" autocomplete="username" required>
+    <input class="li" type="password" id="lpass" placeholder="Password" autocomplete="current-password" required>
+    <button class="btn primary" type="submit">Sign in</button>
+    <div class="err" id="lerr"></div>
+  </form>
+</div>
+<div id="loading">Loading data…</div>
+<div class="layout" id="app">
+<nav id="nav"></nav>
+<main>
+  <header class="top">
+    <h1 id="title">Today</h1>
+    <div class="qwrap"><input class="search" id="q" placeholder="Search everywhere: name, company, email, phone…" autocomplete="off">
+      <button id="qclear" style="display:none" title="Clear search" onclick="qClear()">✕</button>
+      <div id="qdrop" style="display:none"></div></div>
+    <span id="hctl" style="display:flex;gap:6px;align-items:center"></span>
+  </header>
+  <div id="content"></div>
+</main>
+</div>
+<script>
+"use strict";
+const SUPA_URL = "https://yrrknwsfqenugtdtbvhw.supabase.co";
+const SUPA_KEY = "sb_publishable_vGhjGB0Lx9VpExWWW_UdRQ_CzTiYmUO";
+const sb = supabase.createClient(SUPA_URL, SUPA_KEY);
+let ME = null;
+let LEADS = [], byId = {}, STATS = {};
+
+/* company-specific strings (addresses, system URLs) are loaded from the database
+   after login, never written into this file: the page is hosted publicly and
+   hardcoded addresses would be free food for scrapers */
+const ORG = () => (STATS && STATS.orgConfig) || {};
+/* colleagues are never leads: the company domain comes from the database too */
+const isInternal = mail => {
+  const d = (ORG().mailDomain || "").toLowerCase();
+  const m = String(mail || "").toLowerCase();
+  return !!d && m.endsWith("@" + d);
+};
+const TODAY = new Date(); TODAY.setHours(0,0,0,0);
+const day = s => { if(!s) return null; const d=new Date(String(s).slice(0,10)+"T00:00:00"); return isNaN(d)?null:d; };
+const daysAgo = d => Math.round((TODAY - d)/86400000);
+const esc = s => (s||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const digits = s => (s||"").replace(/\D/g,"");
+/* search matches phones in ANY written form: +1-23, 00123, (123), spaces, dots */
+function phoneHit(q, ...phones){
+  const qd = digits(q);
+  if(qd.length<4 || /[a-z]/.test(q)) return false;
+  const qq = qd.replace(/^0+/,"");
+  return !!qq && phones.some(p=>digits(p).includes(qq));
+}
+const matchLead = (l,q) => phoneHit(q, l.phone, l.altPhone) ||
+  [l.name,l.co,l.email,l.phone,l.alt].some(v=>(v||"").toLowerCase().includes(q));
+
+/* ---------- stage mapping ---------- */
+const STAGE = {"Neu":"New","Open - Not Contacted":"New","contacted":"Contacted","call_na":"Contacted",
+  "Checking":"Contacted","qualified":"Qualified","PartnerInterest":"Qualified","partner":"Qualified",
+  "offer_sent":"Offer sent","OFFER SENT HIGH":"Offer sent","DEAL_ECO_OC":"Won","lost":"Lost",
+  "fake":"Junk","Duplicate":"Junk"};
+const HUB2STAGE = {"To call":"New","Contacted":"Contacted","Offer sent":"Offer sent",
+  "Meeting booked":"Qualified","Won":"Won","Lost":"Lost","Junk":"Junk"};
+const HUB_STATUSES = ["To call","Contacted","Offer sent","Meeting booked","Won","Lost","Junk"];
+const ACTIVE = s => !["Won","Lost","Junk"].includes(s);
+
+/* ---------- timezone / country from phone prefix (approx; +1 split by area code) ---------- */
+/* country code → [label, IANA timezone]; clock math uses the browser's timezone
+   database so DST changes are always handled automatically */
+const TZ = {"1":["US","America/New_York"],"20":["EG","Africa/Cairo"],"212":["MA","Africa/Casablanca"],
+"216":["TN","Africa/Tunis"],"27":["ZA","Africa/Johannesburg"],"30":["GR","Europe/Athens"],
+"31":["NL","Europe/Amsterdam"],"33":["FR","Europe/Paris"],"34":["ES","Europe/Madrid"],
+"351":["PT","Europe/Lisbon"],"353":["IE","Europe/Dublin"],"356":["MT","Europe/Malta"],
+"357":["CY","Asia/Nicosia"],"358":["FI","Europe/Helsinki"],"370":["LT","Europe/Vilnius"],
+"39":["IT","Europe/Rome"],"43":["AT","Europe/Vienna"],"44":["UK","Europe/London"],
+"45":["DK","Europe/Copenhagen"],"46":["SE","Europe/Stockholm"],"47":["NO","Europe/Oslo"],
+"48":["PL","Europe/Warsaw"],"49":["DE","Europe/Berlin"],"51":["PE","America/Lima"],
+"52":["MX","America/Mexico_City"],"55":["BR","America/Sao_Paulo"],"57":["CO","America/Bogota"],
+"60":["MY","Asia/Kuala_Lumpur"],"61":["AU","Australia/Sydney"],"62":["ID","Asia/Jakarta"],
+"63":["PH","Asia/Manila"],"64":["NZ","Pacific/Auckland"],"65":["SG","Asia/Singapore"],
+"66":["TH","Asia/Bangkok"],"81":["JP","Asia/Tokyo"],"82":["KR","Asia/Seoul"],
+"86":["CN","Asia/Shanghai"],"90":["TR","Europe/Istanbul"],"91":["IN","Asia/Kolkata"],
+"92":["PK","Asia/Karachi"],"962":["JO","Asia/Amman"],"965":["KW","Asia/Kuwait"],
+"966":["SA","Asia/Riyadh"],"968":["OM","Asia/Muscat"],"971":["AE","Asia/Dubai"],
+"973":["BH","Asia/Bahrain"],"974":["QA","Asia/Qatar"]};
+const CA_AREAS = new Set(["204","226","236","249","250","263","289","306","343","354","365","367","368",
+"382","403","416","418","428","431","437","438","450","468","474","506","514","519","548","579","581",
+"584","587","604","613","639","647","672","683","705","709","742","753","778","780","782","807","819",
+"825","867","873","879","902","905"]);
+function tzInfo(phone){
+  if(!phone) return null;
+  let p = phone.replace(/[^\d+]/g,"");
+  if(p.startsWith("00")) p = p.slice(2); else if(p.startsWith("+")) p = p.slice(1); else return null;
+  for(const len of [3,2,1]){ const c=p.slice(0,len);
+    if(TZ[c]){
+      if(c==="1") return CA_AREAS.has(p.slice(1,4)) ? ["CA","America/Toronto"] : ["US","America/New_York"];
+      return TZ[c];
+    }
+  }
+  return null;
+}
+const CC_NAME = {US:"USA",CA:"Canada",UK:"United Kingdom",IE:"Ireland",DE:"Germany",AT:"Austria",
+CH:"Switzerland",NO:"Norway",SE:"Sweden",DK:"Denmark",FI:"Finland",FR:"France",ES:"Spain",PT:"Portugal",
+IT:"Italy",NL:"Netherlands",PL:"Poland",LT:"Lithuania",MT:"Malta",CY:"Cyprus",GR:"Greece",TR:"Turkey",
+PE:"Peru",CO:"Colombia",MX:"Mexico",BR:"Brazil",QA:"Qatar",BH:"Bahrain",AE:"UAE",SG:"Singapore",
+AU:"Australia",NZ:"New Zealand",EG:"Egypt",MA:"Morocco",TN:"Tunisia",ZA:"South Africa",JO:"Jordan",
+KW:"Kuwait",SA:"Saudi Arabia",OM:"Oman",IN:"India",PK:"Pakistan",JP:"Japan",KR:"Korea",CN:"China",
+MY:"Malaysia",ID:"Indonesia",PH:"Philippines",TH:"Thailand","?":"Unknown"};
+const flag = cc => cc==="?" ? "❓" : String.fromCodePoint(...[...(cc==="UK"?"GB":cc.slice(0,2))].map(c=>127397+c.charCodeAt(0)));
+const TLD_CC = {de:"DE",at:"AT",ch:"CH",uk:"UK",ie:"IE",fr:"FR",it:"IT",es:"ES",pt:"PT",nl:"NL",
+  pl:"PL",se:"SE",no:"NO",dk:"DK",fi:"FI",cy:"CY",gr:"GR",tr:"TR",lt:"LT",mt:"MT",sg:"SG",
+  bh:"BH",qa:"QA",ae:"AE",au:"AU",nz:"NZ",ca:"CA",us:"US"};
+function localHour(zone){
+  try { return +new Intl.DateTimeFormat("en-GB",{timeZone:zone,hour:"2-digit",hour12:false}).format(new Date()); }
+  catch(e){ return null; }
+}
+function callable(l){ const t=tzInfo(l.phone); if(!t) return null;
+  const h=localHour(t[1]); if(h===null) return null;
+  return {cc:t[0], h, ok: h>=CAD().callFrom && h<CAD().callTo}; }
+const clockIn = zone => { try { return new Intl.DateTimeFormat("en-GB",{timeZone:zone,hour:"2-digit",minute:"2-digit"}).format(new Date()); } catch(e){ return "?"; } };
+
+/* ---------- territory view (per-user preference, kept locally) ---------- */
+const MY_TERR   = ["US","CA","UK","IE","AU","NZ","NO","SE","DK","FI"];
+const EU_NODACH = ["UK","IE","FR","IT","ES","PT","NL","PL","SE","NO","DK","FI","LT","MT","CY","GR","TR"];
+let VIEW = {preset:"my", extra:null, callable:false, range:"all", showCC:false};
+try{ VIEW = Object.assign(VIEW, JSON.parse(localStorage.getItem("hub_view_v1")||"{}")); }catch(e){}
+if(VIEW.extra) VIEW.extra = VIEW.extra.flatMap(c=>c==="US/CA"?["US","CA"]:[c]);
+const saveView = () => localStorage.setItem("hub_view_v1", JSON.stringify(VIEW));
+function activeCountries(){
+  if(VIEW.extra) return new Set(VIEW.extra);
+  return new Set([...MY_TERR,"?"]);   // starting default until the user picks; selection persists
+}
+function rangeBounds(){
+  if(VIEW.range==="all"||!VIEW.range) return null;
+  if(typeof VIEW.range==="number") return {from:new Date(TODAY - VIEW.range*86400000), to:null};
+  if(VIEW.range.f||VIEW.range.t) return {from:VIEW.range.f?day(VIEW.range.f):null, to:VIEW.range.t?day(VIEW.range.t):null};
+  return null;
+}
+function applyView(arr){
+  const set = activeCountries();
+  let out = set ? arr.filter(l=>set.has(l.cc)) : arr;
+  if(VIEW.callable) out = out.filter(l=>{const c=callable(l); return c&&c.ok;});
+  const rb = rangeBounds();
+  if(rb) out = out.filter(l=>l.created && (!rb.from || l.created>=rb.from) && (!rb.to || l.created<=rb.to));
+  return out;
+}
+window.applyRange = () => {
+  const f=(document.getElementById("dfrom")||{}).value, t=(document.getElementById("dto")||{}).value;
+  if(!f && !t){ VIEW.range="all"; } else { VIEW.range={f:f||"", t:t||""}; }
+  saveView(); render(false);
+};
+window.ccSelectAll = () => { VIEW.extra = [...new Set(LEADS.filter(l=>!l.internal).map(l=>l.cc))]; saveView(); render(false); };
+window.ccSelectNone = () => { VIEW.extra = []; saveView(); render(false); };
+window.toggleCallable = () => { VIEW.callable=!VIEW.callable; saveView(); render(false); };
+window.setRange = v => { VIEW.range = v==="all"?"all":+v; saveView(); render(false); };
+window.toggleCCPanel = () => { VIEW.showCC=!VIEW.showCC; saveView(); render(false); };
+window.toggleCC = cc => {
+  let set = activeCountries();
+  if(!set){ set = new Set(LEADS.filter(l=>!l.internal).map(l=>l.cc)); }
+  set.has(cc) ? set.delete(cc) : set.add(cc);
+  VIEW.extra = [...set]; saveView(); render(false);
+};
+function viewbar(){
+  const counts={}; LEADS.filter(l=>!l.internal).forEach(l=>counts[l.cc]=(counts[l.cc]||0)+1);
+  const set=activeCountries();
+  const all=Object.keys(counts).length;
+  const shown=Object.keys(counts).filter(c=>set.has(c)).length;
+  const rb=(v,lb)=>`<button class="fbtn ${String(VIEW.range)===String(v)?'active':''}" onclick="setRange('${v}')">${lb}</button>`;
+  const chips = !VIEW.showCC ? "" : `<div class="filters">
+    <button class="fbtn" onclick="ccSelectAll()">✓ Select all</button>
+    <button class="fbtn" onclick="ccSelectNone()">✗ None</button>`+
+    Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([cc,n])=>
+    `<button class="fbtn ${set.has(cc)?'active':''}" onclick="toggleCC('${cc}')" title="Click to show/hide this country">${flag(cc)} ${esc(CC_NAME[cc]||cc)} · ${n}</button>`).join("")+`</div>`;
+  return `<div class="filters" style="margin-bottom:4px">
+      <button class="fbtn ${VIEW.showCC?'active':''}" onclick="toggleCCPanel()">🌍 Countries ${shown}/${all} ${VIEW.showCC?"▴":"▾"}</button>
+      <button class="fbtn ${VIEW.callable?'active':''}" onclick="toggleCallable()">☎ Callable now</button>
+      <span style="flex:1"></span>
+      ${rb("all","All 2026")}${rb(90,"90d")}${rb(30,"30d")}${rb(7,"7d")}
+      <input type="date" class="li" id="dfrom" style="padding:4px 8px;font-size:12px" value="${(VIEW.range&&VIEW.range.f)||""}" title="From date">
+      <input type="date" class="li" id="dto" style="padding:4px 8px;font-size:12px" value="${(VIEW.range&&VIEW.range.t)||""}" title="To date">
+      <button class="fbtn ${VIEW.range&&(VIEW.range.f||VIEW.range.t)?'active':''}" onclick="applyRange()">→ Apply</button></div>
+    ${chips}`;
+}
+
+/* ---------- data loading ---------- */
+function derive(l){
+  const laD = l.la ? day(l.la) : null;
+  const logDays = l.logs.map(x=>({d:day(String(x.at).slice(0,10)), k:x.kind, det:x.detail||""})).filter(x=>x.d);
+  const past = logDays.filter(x=>x.d<=TODAY).map(x=>x.d);
+  const futureMeet = logDays.filter(x=>x.d>TODAY && x.k==="meeting" && !/CANCELED/.test(x.det))
+    .map(x=>x.d).sort((a,b)=>a-b)[0] || null;
+  const dueD = l.due ? day(l.due) : null;          // per-lead reminder (people.next_due)
+  l.planned = [laD && laD>TODAY ? laD : null, futureMeet, dueD && dueD>TODAY ? dueD : null]
+    .filter(Boolean).sort((a,b)=>a-b)[0] || null;
+  l.lastPast = [laD && laD<=TODAY ? laD : null, ...past].filter(Boolean).sort((a,b)=>b-a)[0] || null;
+  l.hot = l.logs.some(g=>{
+    if(g.kind==="meeting" && !/CANCELED/.test(g.detail||"")) return true;
+    if(g.kind!=="call") return false;
+    const det=g.detail||"";
+    if(/\d+h\s/.test(det)) return true;
+    const m=det.match(/(\d+)m\s/); return m && +m[1]>=2;
+  });
+  l.stage = l.hub ? HUB2STAGE[l.hub] : (STAGE[l.sf]||"New");
+  if(l.client) l.stage = "Won";              // paying client = converted, leaves all chase lists
+  l.touches = (l.sfTouches||0) + l.logs.length;
+  l.isNew = l.stage==="New";
+  l.attempted = l.isNew && l.touches>0;
+  l.quiet = l.lastPast ? daysAgo(l.lastPast) : (l.created ? daysAgo(l.created) : 0);
+}
+/* Supabase caps every response at 1000 rows; growing tables MUST be paged or
+   the newest rows silently vanish (that was the "my logged call disappeared on
+   refresh" bug: touches crossed 1000). */
+async function fetchAll(table, sel, orderCol){
+  let out=[], from=0; const CH=1000;
+  for(;;){
+    const {data, error} = await sb.from(table).select(sel).order(orderCol,{ascending:true}).range(from, from+CH-1);
+    if(error) return {data:out, error};
+    out=out.concat(data||[]);
+    if(!data || data.length<CH) return {data:out, error:null};
+    from+=CH;
+  }
+}
+async function loadData(){
+  const [{data:people, error:e1},{data:touchRows, error:e2},{data:statRows, error:e3},{data:couponRows, error:e4},{data:runRows},{data:ticketRows},{data:clientRows},{data:tmsgRows},{data:userRows},{data:umailRows},{data:ucallRows},{data:creqRows}] = await Promise.all([
+    fetchAll("people","*","created_at"),
+    fetchAll("touches","id,person_id,kind,at,detail,by_user,snippet","id"),
+    sb.from("stats").select("key,value"),
+    fetchAll("coupons","code,person_id,issued_at,expires_at,redeemed,raw","id"),
+    sb.from("sync_runs").select("source,ran_at,ok,detail").order("ran_at",{ascending:false}).limit(500),
+    sb.from("tickets").select("*").order("last_activity_at",{ascending:false}).limit(400),
+    sb.from("clients").select("*").order("total_paid",{ascending:false}).limit(500),
+    fetchAll("ticket_messages","*","at"),
+    sb.from("app_users").select("*").order("email"),
+    sb.from("unmatched_inbox").select("*").order("last_at",{ascending:false}).limit(500),
+    sb.from("unmatched_calls").select("*").order("cnt",{ascending:false}).limit(500),
+    sb.from("coupon_requests").select("*").order("id",{ascending:false}).limit(50)
+  ]);
+  if(e1||e2||e3||e4){ hubAlert("Load error", esc((e1||e2||e3||e4).message)); return; }
+  window.__couponRows = couponRows||[];
+  window.__syncRuns = runRows||[];
+  window.__tickets = ticketRows||[];
+  window.__clients = clientRows||[];
+  window.__users = userRows||[];
+  window.__trayMail = umailRows||[];
+  window.__trayCalls = ucallRows||[];
+  window.__couponReqs = creqRows||[];
+  window.__tmsgs = {};
+  (tmsgRows||[]).forEach(m=>{ (window.__tmsgs[m.ticket_id]=window.__tmsgs[m.ticket_id]||[]).push(m); });
+  STATS = Object.fromEntries((statRows||[]).map(r=>[r.key,r.value]));
+  const tByP = {};
+  (touchRows||[]).forEach(t=>{ (tByP[t.person_id]=tByP[t.person_id]||[]).push(t); });
+  // merged duplicates leave the working lists but still count in the funnel's intake
+  window.__mergedRows = (people||[]).filter(p=>p.merged_into).map(p=>{
+    const t = tzInfo(p.phone);
+    const tld=(p.email||"").split(".").pop().toLowerCase();
+    return { created: day(p.sf_created_at)||day(p.created_at), cc: t?t[0]:(TLD_CC[tld]||"?") };
+  });
+  LEADS = (people||[]).filter(p=>!p.merged_into).map(p=>{
+    const mine = (tByP[p.id]||[]).sort((a,b)=>a.at<b.at?-1:1);
+    const t = tzInfo(p.phone);
+    const tld = (p.email||"").split(".").pop().toLowerCase();
+    const l = {
+      id: p.id, sfId: p.sf_id, name: p.name, co: p.company||"", email: p.email||"", alt: p.alt_email||"", phone: p.phone||"",
+      altPhone: p.alt_phone||"", due: p.next_due||null, assigned: p.assigned_to||null,
+      sf: p.sf_status, src: p.source||"", hub: p.hub_status||null,
+      created: day(p.sf_created_at), la: p.sf_last_activity, sfTouches: p.sf_touches||0,
+      notes: mine.filter(x=>x.kind==="note").map(x=>({id:x.id, d:String(x.at).slice(0,10), x:x.detail, by:(x.by_user||"").split("@")[0]})),
+      logs: mine.filter(x=>x.kind!=="note"),
+      cc: t ? t[0] : (TLD_CC[tld]||"?"),
+      coupon: !!p.is_coupon_requester,
+      internal: isInternal(p.email)
+    };
+    derive(l);
+    return l;
+  });
+  byId = Object.fromEntries(LEADS.map(l=>[l.id,l]));
+  const fmtVal = r => (r?.discount_type==="percentage") ? (r.value+"%") : ((r?.value||0)/100+"€");
+  LEADS.forEach(l=>l.coupons=[]);
+  (couponRows||[]).forEach(cp=>{
+    const l = byId[cp.person_id]; if(!l) return;
+    const exp = day(cp.expires_at);
+    l.coupons.push({code:cp.code, val:fmtVal(cp.raw), exp, redeemed:cp.redeemed,
+      issued: cp.issued_at || null,
+      active: !cp.redeemed && exp && exp>=TODAY});
+  });
+  LEADS.forEach(l=>{ l.cp = l.coupons.filter(x=>x.active).sort((a,b)=>a.exp-b.exp)[0] || null; });
+  const cByEmail = {}; (clientRows||[]).forEach(cl=>{ if(cl.email) cByEmail[cl.email]=cl; });
+  LEADS.forEach(l=>{ l.client=null; });
+  (clientRows||[]).forEach(cl=>{ if(cl.person_id && byId[cl.person_id]) byId[cl.person_id].client=cl; });
+  LEADS.forEach(l=>{
+    if(!l.client && l.email && cByEmail[l.email.toLowerCase()]) l.client=cByEmail[l.email.toLowerCase()];
+    if(!l.client && l.alt && cByEmail[l.alt.toLowerCase()]) l.client=cByEmail[l.alt.toLowerCase()];
+  });
+  LEADS.forEach(l=>{ if(l.client) derive(l); });   // clients become "Won" after linking
+  // People completeness: humans the hub knows only from Stripe or support mail
+  // get lightweight entries so the People tab really shows EVERYONE.
+  const known=new Set();
+  LEADS.forEach(l=>{ if(l.email) known.add(l.email.toLowerCase()); if(l.alt) known.add(l.alt.toLowerCase()); });
+  const extras=[];
+  (clientRows||[]).forEach(cl=>{
+    const em=(cl.email||"").toLowerCase();
+    if(cl.person_id && byId[cl.person_id]) return;
+    if(em && known.has(em)) return;
+    if(em) known.add(em);
+    extras.push({pseudo:"client", name:cl.name||cl.email||cl.stripe_id, email:cl.email||"",
+      sub:eur(cl.total_paid,cl.currency)+" · "+cl.payments+"× paid"});
+  });
+  (ticketRows||[]).forEach(t=>{
+    const em=(t.customer_email||"").toLowerCase();
+    if(!em || known.has(em)) return;
+    known.add(em);
+    const cnt=(ticketRows||[]).filter(x=>(x.customer_email||"").toLowerCase()===em).length;
+    extras.push({pseudo:"ticket", name:t.customer_name||t.customer_email, email:t.customer_email,
+      sub:cnt+" ticket"+(cnt>1?"s":"")});
+  });
+  window.__extraPeople=extras;
+}
+const eur = (cents,cur) => (Math.round((cents||0)/100)).toLocaleString("de-DE") + " " + ((cur||"eur").toUpperCase());
+const daysTo = d => Math.round((d - TODAY)/86400000);
+const expTxt = cp => { const n = daysTo(cp.exp); return n===0 ? "expires TODAY" : "expires in "+n+"d"; };
+
+/* ---------- one-time migration of pre-login local edits ---------- */
+async function migrateLocal(){
+  let old={};
+  try{ old = JSON.parse(localStorage.getItem("hub_edits_v1")||"{}"); }catch(e){ return; }
+  const bySf = Object.fromEntries(LEADS.map(l=>[l.sfId,l]));
+  let acted=false;
+  for(const [sfId,e] of Object.entries(old)){
+    const l = bySf[sfId]; if(!l) continue;
+    if(e.st){ await sb.from("people").update({hub_status:e.st}).eq("id",l.id); acted=true; }
+    for(const n of (e.notes||[])){
+      await sb.from("touches").insert({person_id:l.id,kind:"note",detail:n.x,by_user:ME}); acted=true;
+    }
+    for(const g of (e.log||[])){
+      await sb.from("touches").insert({person_id:l.id,kind:g.t,by_user:ME}); acted=true;
+    }
+  }
+  localStorage.removeItem("hub_edits_v1");
+  if(acted) await loadData();
+}
+
+/* ---------- lead row ---------- */
+function leadRow(l, extra){
+  const c = callable(l);
+  const tz = c ? `<span class="tz ${c.ok?'ok':'no'}"><span class="dot"></span>${c.cc} ${String(c.h).padStart(2,"0")}:00</span>` : "";
+  const chips = [
+    l.hot?'<span class="chip" title="Real conversation (2+ min call) or meeting happened" style="background:color-mix(in srgb,var(--crit) 14%,var(--surface))">🔥</span>':"",
+    l.client?`<span class="chip coupon" title="Paying client · ${esc(eur(l.client.total_paid,l.client.currency))}">💰 client</span>`:"",
+    l.cp?`<span class="chip coupon" title="${esc(l.cp.code)}">🎟 ${esc(l.cp.val)}</span>`
+      :(l.coupon?'<span class="chip coupon">Coupon</span>':(/Book a Call/i.test(l.src)?'<span class="chip call">Book-a-call</span>':"")),
+    l.assigned?`<span class="chip asg" title="Lead owner: ${esc(l.assigned)}">👤 ${esc(String(l.assigned).split("@")[0])}</span>`:"",
+    `<span class="chip stage">${esc(l.hub||(l.attempted?"No answer yet":l.stage))}</span>`
+  ].join("");
+  return `<div class="card" data-id="${l.id}">
+    <div class="row" onclick="toggle('${l.id}')">
+      ${window.__SEL&&window.__SEL.on?`<input type="checkbox" ${window.__SEL.ids.has(l.id)?"checked":""} onclick="selToggle('${l.id}');event.stopPropagation()" style="width:16px;height:16px;flex:none;cursor:pointer">`:""}
+      <div class="who"><span class="nm">${esc(l.name)}</span>${l.internal?' <span class="chip">internal</span>':""}
+        <div class="co">${esc(l.co||l.email)}</div></div>
+      ${chips}${tz}
+      <span class="badge-t" title="Touches logged (Salesforce tasks + hub logs)">${l.touches}✦</span>
+      <span class="meta ${extra&&extra.cls||''}">${extra?extra.txt:relTime(l)}</span>
+    </div>
+    <div class="detail">
+      ${phead(l)}
+      <div class="left">
+        <div class="acts">
+          ${l.phone?`<a class="btn" href="https://wa.me/${l.phone.replace(/\D/g,"")}" target="_blank">💬 WhatsApp</a>`:""}
+          <button class="btn" onclick="vcf('${l.id}');event.stopPropagation()">💾 .vcf</button>
+          ${window.CANW!==false?`<button class="btn" onclick="mergeLead('${l.id}');event.stopPropagation()" title="Merge a duplicate person into this one">⇄ Merge</button>`:""}
+        </div>
+        ${window.CANW!==false?`<div class="acts" style="margin-top:8px">
+          <button class="btn primary" onclick="waCall('${l.id}');event.stopPropagation()">+ WA call</button>
+          <button class="btn primary" onclick="waMsg('${l.id}');event.stopPropagation()">+ WA message</button>
+          <button class="btn" onclick="logCall('${l.id}');event.stopPropagation()">+ Log call</button>
+          <select class="st" onchange="assignLead('${l.id}',this.value);this.selectedIndex=0" onclick="event.stopPropagation()" title="Lead owner">
+            <option value="">👤 ${l.assigned?esc(String(l.assigned).split("@")[0]):"Assign lead…"}</option>
+            <option value="__me">→ me</option>
+            ${(window.__users||[]).filter(u=>u.email!==ME).map(u=>`<option value="${esc(u.email)}">${esc(u.name||u.email.split("@")[0])}</option>`).join("")}
+            ${l.assigned?`<option value="__clear">✗ unassign</option>`:""}
+          </select>
+          <select class="st" onchange="snooze('${l.id}',this.value);this.selectedIndex=0" onclick="event.stopPropagation()" title="Personal reminder: the lead hides from the queue and resurfaces on that day">
+            <option value="">⏰ Remind me…</option>
+            <option value="1">tomorrow</option>
+            <option value="3">in 3 days</option>
+            <option value="7">in 1 week</option>
+            <option value="14">in 2 weeks</option>
+            <option value="30">in 1 month</option>
+            <option value="custom">pick a date…</option>
+            ${l.due?`<option value="clear">✗ clear reminder</option>`:""}
+          </select>
+          <label style="font-size:12px;color:var(--muted)">Status
+            <select class="st" onchange="setStatus('${l.id}',this.value)" onclick="event.stopPropagation()">
+              <option value="">(from Salesforce: ${esc(l.sf)})</option>
+              ${HUB_STATUSES.map(s=>`<option ${l.hub===s?"selected":""}>${s}</option>`).join("")}
+            </select></label>
+          <span class="savenote" id="sv-${l.id}">saved ✓</span>
+        </div>`:""}
+      </div>
+      <div style="flex:1;min-width:220px" onclick="event.stopPropagation()">
+        <div class="notelog">${timeline(l).map(e=>
+          `<div class="noteitem"><span class="meta">${esc(e.d)}</span> ${e.i} ${
+            e.snip?`<details class="snip"><summary title="Click to read the email">${esc(e.t)} ▾</summary><div class="body">${esc(e.snip)}</div></details>`:esc(e.t)
+          }${e.del&&window.CANW!==false?`<button class="tdel" title="Delete this manually logged entry" onclick="delTouch(${e.del},'${l.id}')">🗑</button>`:""}</div>`).join("")||'<div class="meta">No activity recorded yet</div>'}</div>
+        ${window.CANW!==false?`<div style="display:flex;gap:6px;margin-top:4px">
+          <textarea class="note" id="nt-${l.id}" placeholder="Add a note…" rows="1"></textarea>
+          <button class="btn" onclick="addNote('${l.id}')">Add</button>
+        </div>`:""}
+        <div class="meta">Source: ${esc(l.src||"?")} · Created ${l.created?l.created.toLocaleDateString():"?"} · ${esc(l.phone||"no phone")}${l.alt?` · also: ${esc(l.alt)}`:""}
+          ${l.sfId&&ORG().salesforceUrl?` · <a class="sflink" href="${esc(ORG().salesforceUrl)}/lightning/r/Lead/${l.sfId}/view" target="_blank" onclick="event.stopPropagation()">Salesforce ↗</a>`:""}</div>
+      </div>
+    </div>
+  </div>`;
+}
+/* a call that came from Placetel (CSV export or the live Notify feed) is system
+   data and can never be deleted; the [pt:] tag marks the live ones */
+const imported = g => /\(Placetel\)|\[pt:/.test(g.detail||"");
+
+/* people a ticket belongs to: by link or by email */
+const ticketsOf = l => {
+  const em=(l.email||"").toLowerCase(), alt=(l.alt||"").toLowerCase();
+  return (window.__tickets||[]).filter(t=>(t.person_id && t.person_id===l.id) ||
+    (t.customer_email && (t.customer_email===em || (alt && t.customer_email===alt))));
+};
+/* lifecycle: client (paid), lead (came in via sales), support-only (only ever wrote to support) */
+function lifecycleOf(l){
+  if(l.client) return "client";
+  const leadish = l.sfId || l.coupon || /website|discount|book|calendly|checkout|email/i.test(l.src||"");
+  if(!leadish && ticketsOf(l).length) return "support";
+  return "lead";
+}
+/* person header: who they are + shortcuts to everything linked to them */
+function phead(l){
+  const tks=ticketsOf(l), openT=tks.filter(t=>t.state!=="resolved").length;
+  const actC=l.coupons.filter(c=>c.active).length;
+  const life=lifecycleOf(l);
+  const lchip = life==="client"?'<span class="chip life-client">💰 client</span>'
+    : life==="support"?'<span class="chip">🎧 support-only</span>':'<span class="chip life-lead">✦ lead</span>';
+  return `<div class="phead" onclick="event.stopPropagation()">
+    ${lchip}
+    ${tks.length?`<span class="chip jump" onclick="jumpSearch('support','${esc(l.email||l.name)}')" title="Open their tickets in Support">🎫 ${openT} open · ${tks.length} total →</span>`:""}
+    ${window.CANW!==false?`<span class="chip jump" onclick="newTicket('${l.id}')" title="Open a support ticket for this person">🎫 ＋ ticket</span>
+    <span class="chip jump coupon" onclick="newCoupon('${l.id}')" title="Issue a discount code through the admin panel">🎟 ＋ coupon</span>`:""}
+    ${l.client?`<span class="chip jump life-client" onclick="jumpSearch('clients','${esc(l.client.email||l.email||l.name)}')" title="Open in Clients">💰 ${esc(eur(l.client.total_paid,l.client.currency))} · ${l.client.payments}× paid →</span>`:""}
+    ${l.coupons.length?`<span class="chip jump coupon" onclick="jumpSearch('coupons','${esc(l.email||l.name)}')" title="Open in Coupons">🎟 ${actC} active · ${l.coupons.length} issued →</span>`:""}
+    ${l.hub||l.stage?`<span class="chip stage">${esc(l.hub||l.stage)}</span>`:""}
+    ${l.due&&day(l.due)&&day(l.due)>TODAY?`<span class="chip" title="Personal reminder set">⏰ ${day(l.due).toLocaleDateString(undefined,{day:"numeric",month:"short"})}</span>`:""}
+    ${l.email?`<span class="chip jump" onclick="copyTxt('${esc(l.email)}','email')" title="Click to copy">✉ ${esc(l.email)}</span>`:""}
+    ${l.alt?`<span class="chip jump" onclick="copyTxt('${esc(l.alt)}','second email')" title="Second email, kept from a merge. Click to copy">✉ ${esc(l.alt)}</span>`:""}
+    ${l.phone?`<span class="chip jump" onclick="copyTxt('${esc(l.phone)}','phone number')" title="Click to copy">☎ ${esc(l.phone)}</span>`:""}
+    ${l.altPhone?`<span class="chip jump" onclick="copyTxt('${esc(l.altPhone)}','second phone')" title="Second phone, kept from a merge. Click to copy">☎ ${esc(l.altPhone)}</span>`:""}
+  </div>`;
+}
+/* one person, whole story: notes, calls, WA, emails, coupons, tickets, payments in one thread */
+function timeline(l){
+  const tks=ticketsOf(l);
+  return [
+    ...l.notes.map(n=>({d:n.d, i:"📝", t:(n.by?n.by+": ":"")+n.x, del:n.id})),
+    ...l.logs.map(g=>({d:String(g.at).slice(0,10),
+      i:g.kind==="meeting"?"📅":g.kind==="wa"?"💬":g.kind==="call"?"📞":"✉️",
+      t:(g.kind==="meeting"?(g.detail||"Meeting")
+        :g.kind==="email"?(g.detail||"Email")
+        :g.kind==="call"?(g.detail||"Call")
+        :(g.detail||"WhatsApp touch")).replace(/\s*\[(cal|pt):[^\]]+\]/g,"")   // internal sync tags stay out of sight
+        +(g.by_user?" · "+String(g.by_user).split("@")[0]:""),
+      snip:g.kind==="email"?(g.snippet||null):null,
+      del:(g.id && (g.kind==="wa" || (g.kind==="call" && !imported(g))))?g.id:null})),
+    ...l.coupons.map(cp=>({d:String(cp.issued||"").slice(0,10), i:"🎟",
+      t:"Coupon "+cp.code+" ("+cp.val+")"+(cp.redeemed?" · redeemed 🎉":(cp.exp?(cp.active?" · expires "+cp.exp.toLocaleDateString():" · expired"):""))})),
+    ...tks.map(t=>({d:String(t.opened_at).slice(0,10), i:"🎫",
+      t:"Support: "+(t.subject||"")+" · "+String(t.state).replace(/_/g," ")})),
+    ...(l.client?[{d:String(l.client.first_paid_at||"").slice(0,10), i:"🎉",
+      t:"LEAD → CLIENT: first payment. "+l.client.payments+" payment"+(l.client.payments>1?"s":"")+" · "
+        +eur(l.client.total_paid,l.client.currency)+" total so far. Below this line is the lead journey, above is life as a client."}]:[])
+  ].filter(e=>e.d).sort((a,b)=>b.d.localeCompare(a.d));
+}
+window.toggleC = id => {
+  const s=window.__openC||(window.__openC=new Set());
+  s.has(id)?s.delete(id):s.add(id);
+  render(false);
+};
+window.toggleT = id => {
+  const s=window.__openT||(window.__openT=new Set());
+  s.has(id)?s.delete(id):s.add(id);
+  render(false);
+};
+/* generic person picker modal: search, click, callback */
+function pickPerson(title, onPick, excludeId){
+  let ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  ov=document.createElement("div"); ov.id="mergeov";
+  ov.innerHTML=`<div class="mcard">
+    <h3>${title}</h3>
+    <input class="li" id="msearch" placeholder="Type name, email, phone or company…">
+    <div id="mres"></div>
+    <button class="btn" onclick="document.getElementById('mergeov').remove()">Cancel</button></div>`;
+  ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
+  document.body.appendChild(ov);
+  const res=ov.querySelector("#mres"), inp=ov.querySelector("#msearch");
+  inp.addEventListener("input",()=>{
+    const q=inp.value.toLowerCase().trim();
+    if(q.length<2){ res.innerHTML=""; return; }
+    const hits=LEADS.filter(x=>x.id!==excludeId && matchLead(x,q)).slice(0,8);
+    res.innerHTML="";
+    hits.forEach(x=>{
+      const d=document.createElement("div"); d.className="mhit";
+      d.innerHTML=`<b>${esc(x.name)}</b> · ${esc(x.email||x.phone||"no contact")} <span class="meta">${esc(x.hub||x.stage)}${x.client?" · 💰":""}</span>`;
+      d.onclick=()=>onPick(x.id);
+      res.appendChild(d);
+    });
+    if(!hits.length) res.innerHTML='<div class="meta" style="padding:8px">No match found</div>';
+  });
+  inp.focus();
+}
+window.mergeLead = keepId => {
+  const keep=byId[keepId];
+  pickPerson(`⇄ Merge a duplicate into "${esc(keep.name)}"`, dupId=>doMerge(keepId,dupId), keepId);
+};
+
+/* ---------- unmatched trays: attach / promote / dismiss ---------- */
+window.trayAssign = (type,key) => {
+  pickPerson((type==="call"?"📞 "+esc(key):"✉️ "+esc(key))+" belongs to…", pid=>doTrayAssign(type,key,pid));
+};
+window.doTrayAssign = async (type,key,pid) => {
+  const l=byId[pid]; if(!l) return;
+  if(type==="call"){
+    const row=(window.__trayCalls||[]).find(x=>x.phone===key);
+    const norm=(row&&row.norm)||key.replace(/\D/g,"");
+    const patch = !l.phone ? {phone:key, phone_norm:norm} : {alt_phone:key, alt_phone_norm:norm};
+    const r=await sb.from("people").update(patch).eq("id",pid);
+    if(r.error){ hubAlert("Failed", esc(r.error.message)); return; }
+    await sb.from("unmatched_calls").update({dismissed:true}).eq("phone",key);
+    if(row) row.dismissed=true;
+    if(!l.phone) l.phone=key;
+    toast("Number attached to "+(l.name||"person")+" ✓; past calls attach on the next Placetel import");
+  } else {
+    const row=(window.__trayMail||[]).find(x=>x.email===key);
+    const patch = !l.email ? {email:key} : {alt_email:key};
+    const r=await sb.from("people").update(patch).eq("id",pid);
+    if(r.error){ hubAlert("Failed", esc(r.error.message)+(/duplicate|unique/i.test(r.error.message)?"<br><br>Someone else already has this email: use ⇄ Merge on their card instead.":"")); return; }
+    await sb.from("unmatched_inbox").update({dismissed:true}).eq("email",key);
+    if(row) row.dismissed=true;
+    if(!l.email) l.email=key; else l.alt=key;
+    toast("Email attached to "+(l.name||"person")+" ✓; future mails match automatically");
+  }
+  const ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  render(false);
+};
+window.trayLead = async (type,key) => {
+  const row = type==="call" ? (window.__trayCalls||[]).find(x=>x.phone===key)
+                            : (window.__trayMail||[]).find(x=>x.email===key);
+  const nm=await hubPrompt("＋ New lead: "+esc(key), {placeholder:"Name", value:(row&&row.name)||"", okLabel:"Create lead"});
+  if(nm===null) return;
+  const rec={name:String(nm).trim()||key, source:"Manual (tray)", sf_status:"manual", stage:"New"};
+  if(type==="call"){ rec.phone=key; rec.phone_norm=(row&&row.norm)||key.replace(/\D/g,""); }
+  else rec.email=key;
+  const {error}=await sb.from("people").insert(rec);
+  if(error){ hubAlert("Failed", esc(error.message)); return; }
+  await (type==="call" ? sb.from("unmatched_calls").update({dismissed:true}).eq("phone",key)
+                       : sb.from("unmatched_inbox").update({dismissed:true}).eq("email",key));
+  if(row) row.dismissed=true;
+  toast("Lead created ✓"); await loadData(); render();
+};
+window.trayTicket = async key => {
+  const row=(window.__trayMail||[]).find(x=>x.email===key);
+  const now=new Date().toISOString();
+  const {error}=await sb.from("tickets").insert({customer_email:key, customer_name:(row&&row.name)||null,
+    subject:(row&&row.last_subject)||"(created from tray)", channel:"email", state:"new",
+    language:"en", opened_at:now, last_activity_at:(row&&row.last_at)||now});
+  if(error){ hubAlert("Failed", esc(error.message)); return; }
+  await sb.from("unmatched_inbox").update({dismissed:true}).eq("email",key);
+  if(row) row.dismissed=true;
+  toast("Ticket created ✓"); await loadData(); render();
+};
+window.trayDismiss = async (type,key,val) => {
+  const {error}=await (type==="call" ? sb.from("unmatched_calls").update({dismissed:val}).eq("phone",key)
+    : sb.from("unmatched_inbox").update({dismissed:val}).eq("email",key));
+  if(error){ hubAlert("Failed", esc(error.message)); return; }
+  const row = type==="call" ? (window.__trayCalls||[]).find(x=>x.phone===key)
+                            : (window.__trayMail||[]).find(x=>x.email===key);
+  if(row) row.dismissed=val;
+  toast(val?"Moved to the dismissed list":"Restored"); render(false);
+};
+window.doMerge = async (keepId, dupId) => {
+  const keep=byId[keepId], dup=byId[dupId];
+  if(!await hubConfirm("⇄ Merge "+esc(dup.name||"?")+" into "+esc(keep.name||"?")+"?",
+    "One person, one card: all notes, touches, coupons and tickets move over, and BOTH emails and BOTH phone numbers are kept. The payment email becomes the primary one.","Merge")) return;
+  const ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  // the person becomes ONE record with BOTH emails; the payment (client) email wins as primary
+  let primary=keep.email;
+  if(dup.client && !keep.client && dup.email){ primary=dup.email; }
+  const altPick=[keep.email, dup.email, keep.alt, dup.alt].filter(e=>e && e!==primary)[0]||null;
+  const jobs=[
+    sb.from("touches").update({person_id:keepId}).eq("person_id",dup.id),
+    sb.from("coupons").update({person_id:keepId}).eq("person_id",dup.id),
+    sb.from("tickets").update({person_id:keepId}).eq("person_id",dup.id),
+    sb.from("clients").update({person_id:keepId}).eq("person_id",dup.id)
+  ];
+  // phones: never lose one — main slot if free, otherwise the second slot
+  if(!keep.phone && dup.phone) jobs.push(sb.from("people").update({phone:dup.phone, phone_norm:dup.phone.replace(/\D/g,"")}).eq("id",keepId));
+  else if(keep.phone && dup.phone && keep.phone!==dup.phone && !keep.altPhone)
+    jobs.push(sb.from("people").update({alt_phone:dup.phone, alt_phone_norm:dup.phone.replace(/\D/g,"")}).eq("id",keepId));
+  const rs=await Promise.all(jobs);
+  const bad=rs.find(r=>r.error);
+  if(bad){ hubAlert("Merge failed", esc(bad.error.message)); return; }
+  // free the duplicate's email first (unique index), then give the survivor both
+  const r1=await sb.from("people").update({email:null, merged_into:keepId}).eq("id",dup.id);
+  const r2=await sb.from("people").update({email:primary||null, alt_email:altPick}).eq("id",keepId);
+  if(r1.error||r2.error){ hubAlert("Merge partially failed", esc((r1.error||r2.error).message)); return; }
+  toast("Merged ✓ (both emails and phones kept)");
+  await loadData(); render();
+};
+function relTime(l){
+  if(l.planned) return "due "+l.planned.toLocaleDateString(undefined,{day:"numeric",month:"short"});
+  if(l.lastPast) return l.quiet===0?"today":l.quiet+"d ago";
+  return "never touched";
+}
+window.toggle = id => { const c=document.querySelector(`.card[data-id="${id}"]`); if(c) c.classList.toggle("open"); };
+function flash(id){ const s=document.getElementById("sv-"+id); if(s){s.style.visibility="visible"; setTimeout(()=>s.style.visibility="hidden",1500);} }
+window.setStatus = async (id,v)=>{
+  const l=byId[id]; l.hub=v||null; derive(l); flash(id); render(false);
+  const {error} = await sb.from("people").update({hub_status:v||null,updated_at:new Date().toISOString()}).eq("id",id);
+  if(error) hubAlert("Save failed", esc(error.message));
+};
+window.addNote = async id => {
+  const box=document.getElementById("nt-"+id); const v=(box.value||"").trim(); if(!v) return;
+  const l=byId[id];
+  const note={d:new Date().toISOString().slice(0,10), x:v, by:(ME||"").split("@")[0]};
+  l.notes.push(note);
+  flash(id); render(false);
+  const card=document.querySelector(`.card[data-id="${id}"]`); if(card) card.classList.add("open");
+  const {data,error} = await sb.from("touches").insert({person_id:id,kind:"note",detail:v,by_user:ME}).select("id").single();
+  if(error) hubAlert("Save failed", esc(error.message)); else note.id=data.id;
+};
+window.logTouch = async (id,t,detail)=>{
+  const l=byId[id];
+  const g={kind:t, at:new Date().toISOString(), detail:detail||null, by_user:ME};
+  l.logs.push(g); derive(l); flash(id); render(false);
+  const card=document.querySelector(`.card[data-id="${id}"]`); if(card) card.classList.add("open");
+  const {data,error} = await sb.from("touches").insert({person_id:id,kind:t,by_user:ME,detail:detail||null}).select("id").single();
+  if(error) hubAlert("Save failed", esc(error.message)); else g.id=data.id;
+};
+window.waMsg = async id => {
+  const t = await hubPrompt("💬 Log a WhatsApp message", {placeholder:"Message text (optional, shows in the timeline)", okLabel:"Log it"});
+  if(t===null) return;
+  logTouch(id,'wa', String(t).trim() ? "WA message: "+String(t).trim() : "WA message");
+};
+window.waCall = async id => {
+  const t = await hubPrompt("💬 Log a WhatsApp call", {placeholder:"Note (optional): outcome, agreements, reminder to self…", okLabel:"Log WA call"});
+  if(t===null) return;
+  logTouch(id,'wa', String(t).trim() ? "WA call: "+String(t).trim() : "WA call");
+};
+window.logCall = async id => {
+  const t = await hubPrompt("📞 Log a call", {placeholder:"Note (optional): outcome, what was agreed…", okLabel:"Log call"});
+  if(t===null) return;
+  logTouch(id,'call', String(t).trim() ? "Call: "+String(t).trim() : null);
+};
+window.snooze = async (id,v) => {
+  if(!v) return;
+  const l=byId[id]; if(!l) return;
+  let dt=null;
+  if(v==="custom"){
+    const picked=await hubPrompt("⏰ Remind me about "+esc(l.name||"this lead"), {input:"date", okLabel:"Set reminder"});
+    if(!picked) return;
+    dt=picked;
+  } else if(v!=="clear"){
+    const d=new Date(TODAY); d.setDate(d.getDate()+ +v);
+    // format in LOCAL time; toISOString would shift the date on non-UTC machines
+    dt=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  }
+  l.due=dt; derive(l); render(false);
+  const card=document.querySelector(`.card[data-id="${id}"]`); if(card) card.classList.add("open");
+  toast(dt ? "Reminder set: "+day(dt).toLocaleDateString(undefined,{day:"numeric",month:"short"})+", resurfaces on Today + Follow-ups then" : "Reminder cleared");
+  const {error}=await sb.from("people").update({next_due:dt}).eq("id",id);
+  if(error) hubAlert("Save failed", esc(error.message));
+};
+window.assignLead = async (id,v) => {
+  if(!v) return;
+  const l=byId[id]; if(!l) return;
+  l.assigned = v==="__clear" ? null : (v==="__me" ? ME : v);
+  render(false);
+  const card=document.querySelector(`.card[data-id="${id}"]`); if(card) card.classList.add("open");
+  toast(l.assigned ? "Lead assigned to "+String(l.assigned).split("@")[0] : "Lead unassigned");
+  const {error}=await sb.from("people").update({assigned_to:l.assigned}).eq("id",id);
+  if(error) hubAlert("Save failed", esc(error.message));
+};
+window.delTouch = async (tid, pid) => {
+  if(!await hubConfirm("🗑 Delete this entry?","Only manually logged notes, WA logs and hub-logged calls can be deleted. Imported history (Placetel, email, Calendly, Salesforce) always stays.","Delete")) return;
+  const {error, count} = await sb.from("touches").delete({count:"exact"}).eq("id",tid);
+  if(error){ hubAlert("Delete failed", esc(error.message)); return; }
+  if(!count){ toast("Not deletable: this entry is system-imported"); return; }
+  const l=byId[pid];
+  if(l){ l.notes=l.notes.filter(n=>n.id!==tid); l.logs=l.logs.filter(g=>g.id!==tid); derive(l); }
+  toast("Deleted ✓"); render(false);
+  const card=document.querySelector(`.card[data-id="${pid}"]`); if(card) card.classList.add("open");
+};
+window.jumpSearch = (tab,q2) => {
+  CURRENT=tab; FILTER="all";
+  const el=document.getElementById("q"); if(el) el.value=q2||"";
+  const ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  render(); window.scrollTo(0,0);
+};
+window.copyTxt = (v, what) => {
+  navigator.clipboard.writeText(v).then(()=>toast("Copied "+what)).catch(()=>toast("Copy failed"));
+};
+function toast(msg){
+  let t=document.getElementById("toast");
+  if(!t){ t=document.createElement("div"); t.id="toast"; document.body.appendChild(t); }
+  t.textContent=msg; t.classList.add("show");
+  clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),1300);
+}
+/* styled dialogs: the hub never shows raw system popups. Pass pre-escaped strings. */
+function hubDialog(o){
+  return new Promise(res=>{
+    const old=document.getElementById("hubdlg"); if(old) old.remove();
+    const ov=document.createElement("div"); ov.id="hubdlg";
+    ov.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:70";
+    ov.innerHTML=`<div class="mcard">
+      <h3>${o.title||""}</h3>
+      ${o.body?`<div class="meta" style="white-space:pre-wrap;line-height:1.5">${o.body}</div>`:""}
+      ${o.input?`<input class="li" id="dlg-in" type="${o.input}" placeholder="${esc(o.placeholder||"")}" value="${esc(o.value||"")}">`:""}
+      <div class="acts" style="justify-content:flex-end">
+        ${o.noCancel?"":`<button class="btn" id="dlg-no">${o.cancelLabel||"Cancel"}</button>`}
+        <button class="btn primary" id="dlg-ok" ${o.danger?'style="background:var(--crit);border-color:var(--crit)"':""}>${o.okLabel||"OK"}</button>
+      </div></div>`;
+    const done=v=>{ ov.remove(); res(v); };
+    ov.addEventListener("click",e=>{ if(e.target===ov) done(null); });
+    ov.addEventListener("keydown",e=>{ if(e.key==="Escape") done(null); });
+    ov.querySelector("#dlg-ok").onclick=()=>done(o.input?ov.querySelector("#dlg-in").value:true);
+    const no=ov.querySelector("#dlg-no"); if(no) no.onclick=()=>done(null);
+    document.body.appendChild(ov);
+    const inp=ov.querySelector("#dlg-in");
+    if(inp){ inp.focus(); inp.addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); done(inp.value); } }); }
+    else ov.querySelector("#dlg-ok").focus();
+  });
+}
+const hubConfirm=(title,body,okLabel)=>hubDialog({title,body,okLabel:okLabel||"Yes, do it",danger:true}).then(v=>v===true);
+const hubPrompt=(title,o)=>hubDialog(Object.assign({title,input:"text",okLabel:"Save"},o||{}));
+const hubAlert=(title,body)=>hubDialog({title,body,noCancel:true});
+window.vcf = id => {
+  const l=byId[id];
+  const card=["BEGIN:VCARD","VERSION:3.0","FN:"+(l.co? l.name+" ("+l.co+")":l.name),
+    l.co?"ORG:"+l.co:"","TEL;TYPE=CELL:"+(l.phone||""),"EMAIL:"+(l.email||""),"NOTE:OrderCube lead","END:VCARD"]
+    .filter(Boolean).join("\r\n");
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([card],{type:"text/vcard"}));
+  a.download=(l.name||"lead").replace(/\W+/g,"_")+".vcf"; a.click();
+};
+window.vcfAll = () => {
+  const cards=applyView(newLeads()).filter(l=>l.phone).map(l=>["BEGIN:VCARD","VERSION:3.0",
+    "FN:"+(l.co? l.name+" ("+l.co+")":l.name)+" [OC lead]",l.co?"ORG:"+l.co:"","TEL;TYPE=CELL:"+l.phone,
+    "EMAIL:"+(l.email||""),"END:VCARD"].filter(Boolean).join("\r\n")).join("\r\n");
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([cards],{type:"text/vcard"}));
+  a.download="ordercube_new_leads.vcf"; a.click();
+};
+
+/* ---------- pools ---------- */
+const worked     = l => !l.isNew || l.attempted;
+const newLeads   = () => LEADS.filter(l=>l.isNew && !l.attempted && !l.internal).sort((a,b)=>b.created-a.created);
+const attemptedL = () => LEADS.filter(l=>l.attempted && ACTIVE(l.stage) && !l.internal)
+                          .sort((a,b)=>(b.lastPast||b.created)-(a.lastPast||a.created));
+const followups  = () => LEADS.filter(l=>worked(l) && ACTIVE(l.stage) && !l.internal)
+                          .sort((a,b)=>(b.lastPast||b.created)-(a.lastPast||a.created));
+const dueToday   = () => LEADS.filter(l=>!l.internal && ACTIVE(l.stage) && (
+                          (l.planned && l.planned<=TODAY) ||
+                          (worked(l) && l.quiet>=CAD().resurface && l.quiet<CAD().quiet && l.touches<5)));
+const planned    = () => LEADS.filter(l=>l.planned && l.planned>TODAY && !l.internal && ACTIVE(l.stage)).sort((a,b)=>a.planned-b.planned);
+const goneQuiet  = () => LEADS.filter(l=>worked(l) && ACTIVE(l.stage) && !l.internal && l.quiet>=CAD().quiet)
+                          .sort((a,b)=>b.quiet-a.quiet);
+const coupons    = () => LEADS.filter(l=>(l.coupons.length||l.coupon) && !l.internal && !l.client)
+                          .sort((a,b)=>{
+                            if(a.cp && b.cp) return a.cp.exp-b.cp.exp;
+                            if(a.cp) return -1; if(b.cp) return 1;
+                            return (b.created||0)-(a.created||0);
+                          });
+const couponsExpiring = () => LEADS.filter(l=>!l.internal && !l.client && ACTIVE(l.stage) && l.cp && daysTo(l.cp.exp)<=7)
+                          .sort((a,b)=>a.cp.exp-b.cp.exp);
+/* follow-up queue rules: a touch snoozes the lead for N days, then it resurfaces.
+   The rhythm is per user (Settings → My cadence). */
+function CAD(){ return Object.assign({resurface:3, quiet:14, callFrom:9, callTo:20, giveup:5},
+  (window.__PREFS && window.__PREFS.cadence) || {}); }
+const fuSnoozed   = l => l.lastPast && daysAgo(l.lastPast) < CAD().resurface;
+const fuScheduled = l => l.planned && l.planned > TODAY;
+/* his stop-chasing signals: dead number (call_na, never connected) or enough
+   attempts without ever a real conversation. Any new touch or a real connect
+   brings them back automatically. */
+const neverConnected = l => !l.logs.some(g=>g.kind==="call" && (!g.detail || !/not reached/i.test(g.detail)));
+const fuGaveUp    = l => !l.hot && !l.client && neverConnected(l) && (
+     (l.sf==="call_na") ||
+     (["New","Contacted"].includes(l.stage) && l.logs.filter(g=>g.kind==="call").length >= CAD().giveup));
+const fuDue       = arr => arr.filter(l=>!fuSnoozed(l) && !fuScheduled(l) && !fuGaveUp(l));
+
+/* ---------- panels ---------- */
+function bars(pairs, colors, total){
+  const max=Math.max(...pairs.map(p=>p[1]));
+  return `<div class="bars">`+pairs.map((p,i)=>{
+    const w=Math.max(2,Math.round(p[1]/max*100));
+    const pc= total? ` · ${Math.round(p[1]/total*100)}%`:"";
+    return `<div class="bar"><div class="lb">${esc(p[0])}</div>
+      <div class="tr"><div class="fl" style="width:${w}%;background:${colors[i]||colors[colors.length-1]}"
+        title="${esc(p[0])}: ${p[1]}"></div><span class="vl" style="--w:${w}%">${p[1]}${pc}</span></div></div>`;
+  }).join("")+`</div>`;
+}
+function list(arr, extraFn){
+  if(!arr.length) return `<div class="empty">Nothing here right now 🎉</div>`;
+  return arr.map(l=>leadRow(l, extraFn&&extraFn(l))).join("");
+}
+let FILTER="all";
+window.setFilter=f=>{FILTER=f;render(false);};
+window.SORT = window.SORT || "recent";
+window.setSort = v => { window.SORT=v; render(false); };
+function sortArr(arr){
+  const s=window.SORT||"recent", a=[...arr];
+  if(s==="newest") a.sort((x,y)=>(y.created||0)-(x.created||0));
+  else if(s==="oldest") a.sort((x,y)=>(x.created||0)-(y.created||0));
+  else if(s==="touches") a.sort((x,y)=>y.touches-x.touches);
+  else if(s==="hot") a.sort((x,y)=>((y.hot?1:0)-(x.hot?1:0)) || ((y.lastPast||0)-(x.lastPast||0)));
+  return a;
+}
+const sortSel = () => `<select class="st" onchange="setSort(this.value)" title="Sort order">
+  ${[["recent","Sort: recent touch"],["newest","Sort: created newest"],["oldest","Sort: created oldest"],["touches","Sort: most touches"],["hot","Sort: 🔥 first"]]
+    .map(([v,l2])=>`<option value="${v}" ${window.SORT===v?"selected":""}>${l2}</option>`).join("")}</select>`;
+const applyQ = arr => {
+  const v = applyView(arr);
+  const q=(document.getElementById("q").value||"").toLowerCase().trim();
+  if(!q) return v;
+  return v.filter(l=>matchLead(l,q));
+};
+
+const PANELS = {
+  today: {
+    title:"Today", filterable:true, count:()=>applyView(dueToday()).length+applyView(goneQuiet()).length+applyView(couponsExpiring()).length,
+    render(){
+      const due=applyQ(dueToday()), quiet=applyQ(goneQuiet()), plan=applyQ(planned()), cexp=applyQ(couponsExpiring());
+      return `
+      <div class="tiles">
+        <div class="tile click" onclick="jump('sec-due')"><div class="v">${due.length}</div><div class="l">Follow-ups due</div><div class="s">planned or ${CAD().resurface}+ days silent</div></div>
+        <div class="tile click" onclick="jump('sec-cexp')"><div class="v">${cexp.length}</div><div class="l">Coupons expiring ≤7d</div><div class="s">call before the code dies</div></div>
+        <div class="tile click" onclick="jump('sec-quiet')"><div class="v">${quiet.length}</div><div class="l">Gone quiet</div><div class="s">${CAD().quiet}+ days, still active</div></div>
+        <div class="tile click" onclick="go('fresh')"><div class="v">${applyQ(newLeads()).length}</div><div class="l">Untouched leads</div><div class="s">zero activity so far</div></div>
+      </div>
+      <h2 id="sec-cexp">Coupons expiring soon (${cexp.length})</h2>
+      ${list(cexp, l=>({txt:expTxt(l.cp), cls: daysTo(l.cp.exp)<=3?"due":"quiet"}))}
+      <h2 id="sec-due">Due follow-ups (${due.length})</h2>
+      ${list(due, l=>l.planned?{txt:"due "+l.planned.toLocaleDateString(undefined,{day:"numeric",month:"short"}),cls:"due"}:{txt:l.quiet+"d silent",cls:"quiet"})}
+      <h2 id="sec-quiet">Gone quiet, ${CAD().quiet}+ days (${quiet.length})</h2>
+      ${list(quiet, l=>({txt:l.quiet+"d silent",cls:"quiet"}))}
+      <h2>Scheduled ahead (${plan.length})</h2>
+      ${list(plan, l=>({txt:"due "+l.planned.toLocaleDateString(undefined,{day:"numeric",month:"short"})}))}`;
+    }
+  },
+  fresh: {
+    title:"New leads", filterable:true, count:()=>applyView(newLeads()).length,
+    render(){
+      let arr=applyQ(newLeads()), att=applyQ(attemptedL());
+      if(FILTER==="mine"){ arr=arr.filter(l=>l.assigned===ME); att=att.filter(l=>l.assigned===ME); }
+      if(FILTER==="unassigned"){ arr=arr.filter(l=>!l.assigned); att=att.filter(l=>!l.assigned); }
+      const fb=(id,lb)=>`<button class="fbtn ${FILTER===id?'active':''}" onclick="setFilter('${id}')">${lb}</button>`;
+      return `<p class="hint">"Untouched" means zero logged activity, not just status "Neu". People you already tried (calls logged, no answer) are listed separately below and in Follow-ups. Save numbers to your phone before calling so WhatsApp shows a name.</p>
+      <div class="filters">${fb("all","All")}${fb("mine","👤 Mine")}${fb("unassigned","Unassigned")}${selBtn()}<button class="fbtn" onclick="window.__PF='lead';go('people')" title="The full registry: every lead ever, whatever the stage">📇 All leads →</button><button class="btn" onclick="vcfAll()">💾 Download all as contacts (.vcf)</button>${sortSel()}</div>
+      ${selBar([...arr,...att].map(l=>l.id))}
+      <h2>Untouched (${arr.length})</h2>
+      ${list(sortArr(arr), l=>({txt:daysAgo(l.created)===0?"today":daysAgo(l.created)+"d old"}))}
+      <h2>Attempted, no answer yet (${att.length})</h2>
+      ${list(sortArr(att))}`;
+    }
+  },
+  followups: {
+    title:"Follow-ups", filterable:true, count:()=>fuDue(applyView(followups())).length,
+    render(){
+      let arr=applyQ(followups());
+      if(FILTER==="lt5") arr=arr.filter(l=>l.touches<5);
+      if(FILTER==="coupon") arr=arr.filter(l=>l.coupon);
+      if(FILTER==="noanswer") arr=arr.filter(l=>l.attempted);
+      if(FILTER==="mine") arr=arr.filter(l=>l.assigned===ME);
+      if(FILTER==="unassigned") arr=arr.filter(l=>!l.assigned);
+      const fb=(id,lb)=>`<button class="fbtn ${FILTER===id?'active':''}" onclick="setFilter('${id}')">${lb}</button>`;
+      const due=fuDue(arr), snoozed=arr.filter(fuSnoozed), sched=arr.filter(l=>!fuSnoozed(l)&&fuScheduled(l)),
+            gaveup=arr.filter(l=>!fuSnoozed(l)&&!fuScheduled(l)&&fuGaveUp(l));
+      const backIn=l=>{ const n=CAD().resurface-daysAgo(l.lastPast); return (l.quiet===0?"✓ touched today":"touched "+l.quiet+"d ago")+" · back in "+n+"d"; };
+      return `<p class="hint">The work queue: everyone with any activity whose turn it is again. A call, WA or email today snoozes them; they come back automatically after ${CAD().resurface} days (change the rhythm in Settings → My cadence). Snoozed and scheduled people are in the folded lists below, nothing is lost. ✦ = touches this year, 🔥 = real conversation or meeting.</p>
+      <div class="filters">${fb("all","All")}${fb("mine","👤 Mine")}${fb("unassigned","Unassigned")}${fb("lt5","Under 5 touches")}${fb("coupon","Coupon requesters")}${fb("noanswer","No answer yet")}${selBtn()}${sortSel()}</div>
+      ${selBar(due.map(l=>l.id))}
+      <h2>Due now (${due.length})</h2>
+      ${list(sortArr(due))}
+      <details class="tbl" ${snoozed.length?"":"style='display:none'"}><summary>💤 Recently touched, snoozed (${snoozed.length}): resurface after ${CAD().resurface} days</summary>
+      ${snoozed.sort((a,b)=>(b.lastPast||0)-(a.lastPast||0)).map(l=>leadRow(l,{txt:backIn(l)})).join("")}</details>
+      <details class="tbl" ${sched.length?"":"style='display:none'"}><summary>📅 Scheduled ahead (${sched.length}): hidden until their date</summary>
+      ${sched.sort((a,b)=>a.planned-b.planned).map(l=>leadRow(l,{txt:"due "+l.planned.toLocaleDateString(undefined,{day:"numeric",month:"short"})})).join("")}</details>
+      <details class="tbl" ${gaveup.length?"":"style='display:none'"}><summary>🏳 Given up / dead numbers (${gaveup.length}): call_na or ${CAD().giveup}+ attempts, never reached. Out of the queue; any new touch or real connect brings them back</summary>
+      ${gaveup.sort((a,b)=>b.touches-a.touches).map(l=>leadRow(l,{txt:l.sf==="call_na"?"call_na · number dead":l.logs.filter(g=>g.kind==="call").length+" attempts, none connected"})).join("")}</details>`;
+    }
+  },
+  coupons: {
+    title:"Coupons", filterable:true, count:()=>applyView(coupons()).length,
+    render(){
+      const arr=applyQ(coupons());
+      const cc=window.__couponRows||[];
+      const act=cc.filter(x=>!x.redeemed && day(x.expires_at)>=TODAY).length;
+      const red=cc.filter(x=>x.redeemed).length;
+      const reqs=(window.__couponReqs||[]);
+      const pend=reqs.filter(r=>r.status==="pending"), failed=reqs.filter(r=>r.status==="failed");
+      return `<p class="hint">Live from ${esc(ORG().panelUrl||"the admin panel")}: ${cc.length} coupons issued, ${act} currently active, ${red} redeemed. Sorted by expiry, soonest first. 🎟 chip shows the discount; hover it for the code. The panel sends the code by email and reminds the customer 3 days and 1 day before it expires.</p>
+      ${window.CANW!==false?`<div class="filters"><button class="fbtn" onclick="newCoupon()">＋ Create coupon</button>
+        ${pend.length?`<span class="chip" title="Waiting for the next sync run, or press Sync now">⏳ ${pend.length} being created</span>`:""}
+        ${failed.length?`<span class="chip" style="color:var(--crit)" title="${esc(failed.map(f=>f.email+": "+(f.error||"")).join(" · "))}">✗ ${failed.length} failed</span>`:""}</div>`:""}
+      ${list(arr, l=> l.cp ? {txt:expTxt(l.cp), cls: daysTo(l.cp.exp)<=3?"due":""}
+        : {txt: l.coupons.length ? (l.coupons.some(x=>x.redeemed)?"redeemed 🎉":"expired") : "requested, none issued"})}`;
+    }
+  },
+  funnel: {
+    title:"Funnel", filterable:true, count:()=>applyView(LEADS.filter(l=>!l.internal)).length,
+    render(){
+      const arr=applyQ(LEADS.filter(l=>!l.internal));
+      const set=activeCountries(), rb=rangeBounds();
+      const mergedN=(window.__mergedRows||[]).filter(m=>set.has(m.cc) &&
+        (!rb || (m.created && (!rb.from||m.created>=rb.from) && (!rb.to||m.created<=rb.to)))).length;
+      const GIVEUP=CAD().giveup;
+      const connectedCall=l=>l.logs.some(g=>g.kind==="call" && (!g.detail || !/not reached/i.test(g.detail)));
+      const callN=l=>l.logs.filter(g=>g.kind==="call").length;
+      // one bucket per human; a later real conversation rescues them back to Real
+      const bucket=l=>{
+        if(l.client) return "real";
+        if(l.sf==="Duplicate") return "dup";
+        if(l.stage==="Junk") return "junk";
+        if(l.sf==="call_na" && !connectedCall(l)) return "wrong";
+        if(["New","Contacted"].includes(l.stage) && callN(l)>=GIVEUP && !connectedCall(l) && !l.hot) return "gaveup";
+        return "real";
+      };
+      const B={dup:mergedN, junk:0, wrong:0, gaveup:0};
+      const realArr=[];
+      arr.forEach(l=>{ const b=bucket(l); if(b==="real") realArr.push(l); else B[b]++; });
+      const received=arr.length+mergedN;
+      const notReal=B.dup+B.junk+B.wrong+B.gaveup;
+      const realN=realArr.length;
+      const pct=(n,d)=>d?Math.round(n/d*100):0;
+      const untouched=realArr.filter(l=>l.isNew&&!l.attempted).length;
+      const attempted=realArr.filter(l=>l.attempted).length;
+      const cnt=s=>realArr.filter(l=>!l.isNew&&l.stage===s).length;
+      const won=cnt("Won"), offers=cnt("Offer sent");
+      const stages=[["New · untouched",untouched],["New · attempted",attempted],
+        ["Contacted",cnt("Contacted")],["Qualified",cnt("Qualified")],["Offer sent",offers],
+        ["Won",won],["Lost",cnt("Lost")]];
+      const colors=["var(--f1)","var(--f1)","var(--f2)","var(--f3)","var(--f4)","var(--f5)","var(--fgray)"];
+      const bs=[["Wrong number",B.wrong],["Duplicates",B.dup],["Junk / fake",B.junk],["Gave up · "+GIVEUP+"+ tries",B.gaveup]];
+      const bucketSrc=s=>!s?"Other":/Discount/i.test(s)?"Discount request":/Book a Call/i.test(s)?"Book a call"
+        :/Checkout/i.test(s)?"Checkout":/Calendly/i.test(s)?"Calendly":s==="Website"?"Website":"Other";
+      const sc={}; arr.forEach(l=>{const k=bucketSrc(l.src); sc[k]=(sc[k]||0)+1;});
+      const src=Object.entries(sc).sort((a,b)=>b[1]-a[1]);
+      return `
+      <div class="tiles">
+        <div class="tile"><div class="v">${received}</div><div class="l">Received</div><div class="s">everything that came in, incl. duplicates and junk</div></div>
+        <div class="tile"><div class="v">${notReal}</div><div class="l">Not real</div><div class="s">${pct(notReal,received)}% of received · breakdown below</div></div>
+        <div class="tile"><div class="v">${realN}</div><div class="l">Real leads</div><div class="s">${pct(realN,received)}% of received · worth working</div></div>
+        <div class="tile click" onclick="go('followups')"><div class="v">${offers}</div><div class="l">Offers out</div></div>
+        <div class="tile"><div class="v">${won}</div><div class="l">Won</div><div class="s">${pct(won,realN)}% of real leads</div></div>
+      </div>
+      <details class="tbl"><summary>Not real: ${notReal} (${pct(notReal,received)}% of received) · wrong numbers, duplicates, junk, given up</summary>
+      <p class="hint">Wrong number = status call_na and never a connected call (calling no longer applicable). Gave up = ${GIVEUP}+ call attempts, none connected (threshold: Settings → My cadence). Duplicates = merged cards + Salesforce-flagged. Anyone you later actually reach moves back to Real automatically.</p>
+      ${bars(bs,["var(--serious)","var(--fgray)","var(--fgray)","var(--warn)"],received)}</details>
+      <h2>Pipeline, real leads only (${realN})</h2>
+      <p class="hint">Counts follow the filter bar (countries + date range). Percentages are of REAL leads, so conversion is honest: dead numbers and junk no longer water it down. Nothing is changed in Salesforce.</p>
+      ${bars(stages,colors,realN||1)}
+      <h2>Leads by source (all received)</h2>
+      ${bars(src,["var(--f3)","var(--f3)","var(--f3)","var(--f3)","var(--f3)","var(--f3)"],received)}
+      <details class="tbl"><summary>View as table</summary><table>
+      <tr><th>Intake</th><th>Leads</th></tr>
+      <tr><td>Received</td><td>${received}</td></tr>
+      ${bs.map(s=>`<tr><td>· ${esc(s[0])}</td><td>${s[1]}</td></tr>`).join("")}
+      <tr><td><b>Real</b></td><td><b>${realN}</b></td></tr>
+      <tr><th>Stage (of real)</th><th>Leads</th></tr>
+      ${stages.map(s=>`<tr><td>${s[0]}</td><td>${s[1]}</td></tr>`).join("")}
+      <tr><th>Source</th><th>Leads</th></tr>
+      ${src.map(s=>`<tr><td>${esc(s[0])}</td><td>${s[1]}</td></tr>`).join("")}</table></details>`;
+    }
+  },
+  clients: {
+    title:"Clients", filterable:true, count:()=>(window.__clients||[]).length,
+    render(){
+      const q=(document.getElementById("q").value||"").toLowerCase().trim();
+      const set=activeCountries();
+      const ccOf=cl=>{ const lead=cl.person_id&&byId[cl.person_id];
+        if(lead) return lead.cc;
+        const tld=(cl.email||"").split(".").pop().toLowerCase(); return TLD_CC[tld]||"?"; };
+      const rbC = rangeBounds();
+      const cs=(window.__clients||[]).filter(cl=>
+        (!q||[cl.name,cl.email].some(v=>(v||"").toLowerCase().includes(q)))
+        && set.has(ccOf(cl))
+        && (!rbC || (cl.first_paid_at && (!rbC.from || new Date(cl.first_paid_at)>=rbC.from)
+                                      && (!rbC.to || new Date(cl.first_paid_at)<=rbC.to))));
+      const totalRev=cs.reduce((a,c)=>a+(c.total_paid||0),0);
+      const firsts=cs.map(c=>c.first_paid_at).filter(Boolean).map(d=>new Date(d));
+      const monthsActive=Math.max(1,firsts.length?Math.round((Date.now()-Math.min(...firsts))/2592000000):1);
+      const monthly=totalRev/monthsActive;
+      return `
+      <p class="hint">Everyone who actually paid, straight from Stripe. Country and date filters above apply (date = first payment, so ranges show new-client cohorts for reporting). Projection = monthly run-rate × 12 ("Subscriptions: Read" on the Stripe key would unlock true MRR). Clients are automatically counted as "Won" in the funnel and removed from all chase lists, so lead history stays accurate: a converted lead is still a lead in the year's numbers, just not a target anymore.</p>
+      <div class="tiles">
+        <div class="tile"><div class="v">${cs.length}</div><div class="l">Paying clients</div></div>
+        <div class="tile"><div class="v">${eur(totalRev)}</div><div class="l">Collected, all time</div></div>
+        <div class="tile"><div class="v">${eur(totalRev/Math.max(1,cs.length))}</div><div class="l">Avg per client</div></div>
+        <div class="tile"><div class="v">${eur(monthly)}</div><div class="l">Monthly run-rate</div></div>
+        <div class="tile"><div class="v">${eur(monthly*12)}</div><div class="l">Projected 12 months</div></div>
+      </div>
+      ${cs.map(cl=>{
+        const lead = (cl.person_id&&byId[cl.person_id]) || null;
+        const last = cl.last_paid_at? daysAgo(new Date(String(cl.last_paid_at).slice(0,10)+"T00:00:00")) : null;
+        const pays = (cl.raw && cl.raw.pays) || [];
+        const isOpen = (window.__openC||new Set()).has(cl.stripe_id);
+        return `<div class="card ${isOpen?'open':''}"><div class="row" onclick="toggleC('${esc(cl.stripe_id)}')">
+          <div class="who"><span class="nm">💰 ${esc(cl.name||cl.email||cl.stripe_id)}</span>
+            <div class="co">${esc(cl.email||"")}</div></div>
+          <span class="chip" title="Successful Stripe payments only">${cl.payments}× paid ✓</span>
+          ${lead?`<span class="chip stage">${esc(lead.hub||lead.stage)}</span>`:""}
+          <a class="btn" href="https://dashboard.stripe.com/customers/${esc(cl.stripe_id)}" target="_blank" title="Open in Stripe" onclick="event.stopPropagation()">Stripe ↗</a>
+          ${cl.email?`<button class="btn" onclick="copyTxt('${esc(cl.email)}','email');event.stopPropagation()" title="Copy email">📋 ✉</button>`:""}
+          <span class="badge-t">${eur(cl.total_paid,cl.currency)}</span>
+          <span class="meta">${last===null?"":(last===0?"paid today":"paid "+last+"d ago")}</span>
+        </div>
+        <div class="detail" style="display:${isOpen?'flex':'none'};flex-direction:column">
+          <div class="notelog">${pays.length?pays.map(p2=>`<div class="noteitem">
+            <span class="meta">${new Date(p2.t*1000).toLocaleDateString()}</span> ${eur(p2.amt,cl.currency)}
+            ${p2.inv?` · invoice ${esc(String(p2.inv).slice(-10))}`:""}
+            · <a href="https://dashboard.stripe.com/payments/${esc(p2.id)}" target="_blank">receipt ↗</a></div>`).join("")
+            :'<div class="meta">Payment details appear after the next Stripe sync (runs within 30 min).</div>'}</div>
+        </div></div>`;
+      }).join("")||'<div class="empty">No paying clients found</div>'}`;
+    }
+  },
+  settings: {
+    title:"Settings", hidden:true, count:()=>"",
+    render(){
+      const CONN = [
+        ["Salesforce", "salesforce", "read-only Hub Sync user, every 30 minutes, around the clock"],
+        ["Coupons (admin panel)", "admin_panel", "pulls all discounts and creates the ones requested here"],
+        ["Email", "email", "auto-sorting: support@ → tickets, team@/hello@ → leads, known senders → touches"],
+        ["Stripe", "stripe", "paying clients and revenue for the Clients tab"],
+        ["Placetel (calls)", "placetel", "calls auto-log through the Notify API; the CSV import stays as a cross-check"]
+      ];
+      const row = ([name, key, note]) => {
+        const s=srcHealth(key);
+        const col=s.state==="bad"?"var(--crit)":s.state==="stale"?"var(--serious)":"var(--goodtext)";
+        const mark=s.state==="bad"?"✗":s.state==="stale"?"⚠":"✓";
+        return `<div class="card"><div class="row" style="cursor:default">
+        <div class="who"><span class="nm">${name}</span><div class="co">${esc(note)}</div></div>
+        ${s.last ? `<span class="chip" style="color:${col}">${mark} ${s.state==="bad"?"failing":s.state==="stale"?"stale":"working"} · ${new Date(s.last.ran_at).toLocaleString(undefined,{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</span>`
+                 : `<span class="chip" style="color:var(--serious)">⚠ never synced</span>`}
+        ${s.msg?`<div style="width:100%;font-size:12.5px;color:${col};overflow-wrap:anywhere">${esc(s.msg)}</div>`:""}
+      </div></div>`;
+      };
+      return `
+      <h2>Account</h2>
+      <div class="card"><div class="detail" style="display:flex;border-top:0">
+        <div class="left">
+          <div class="meta" style="margin-bottom:6px">Signed in as <b>${esc(ME||"")}</b></div>
+          <div class="acts">
+            <input class="li" type="password" id="npw" placeholder="New password (min 8)" style="max-width:220px">
+            <button class="btn" onclick="changePw()">Change password</button>
+            <button class="btn" onclick="signOut()">Sign out</button>
+            <button class="btn" onclick="saveMyDefaults()" title="Country selection, date range, support filters and start tab are stored for this login, on every device">💾 Save current view as my default</button>
+          </div>
+        </div>
+        <div style="flex:1;min-width:200px" class="meta">
+          🕐 Berlin ${clockIn("Europe/Berlin")} · New York ${clockIn("America/New_York")} · London ${clockIn("Europe/London")} · Sydney ${clockIn("Australia/Sydney")}<br>
+          Lead clocks use the live world timezone database; summer/winter time adjusts automatically. Your callable window per lead: ${String(CAD().callFrom).padStart(2,"0")}:00-${String(CAD().callTo).padStart(2,"0")}:00 their local time.
+        </div>
+      </div></div>
+      <h2>My cadence</h2>
+      <p class="hint">Your personal rhythm, saved for this login: when a touched lead resurfaces in the queue, when a lead counts as gone quiet, and your calling window in the lead's local time. Today and Follow-ups both follow these numbers.</p>
+      <div class="card"><div class="row" style="cursor:default">
+        <label class="chip">resurface after <input class="li" id="cad-res" type="number" min="1" max="30" value="${CAD().resurface}" style="width:56px;padding:2px 6px"> days</label>
+        <label class="chip">gone quiet at <input class="li" id="cad-quiet" type="number" min="2" max="90" value="${CAD().quiet}" style="width:56px;padding:2px 6px"> days</label>
+        <label class="chip">callable from <input class="li" id="cad-from" type="number" min="0" max="23" value="${CAD().callFrom}" style="width:52px;padding:2px 6px">:00 to <input class="li" id="cad-to" type="number" min="1" max="24" value="${CAD().callTo}" style="width:52px;padding:2px 6px">:00</label>
+        <label class="chip" title="After this many call attempts with zero real conversations, the funnel counts the lead as given up">give up after <input class="li" id="cad-giveup" type="number" min="2" max="20" value="${CAD().giveup}" style="width:52px;padding:2px 6px"> attempts</label>
+        <button class="btn primary" onclick="saveCadence()">Save cadence</button>
+      </div></div>
+      <h2>Data connections</h2>
+      <p class="hint">Live status of every source feeding this hub, updated on each sync run.</p>
+      ${CONN.map(row).join("")}
+      <h2>Mailboxes</h2>
+      <p class="hint">One card per connected mailbox, health refreshed on every sync run. A red card means the stored password is wrong or expired: an admin fixes the secret on the server, nothing to type here. New teammates' mailboxes are added the same way, takes two minutes.</p>
+      ${(()=>{
+        const acc=STATS.emailAccounts||null;
+        const legacy=[...new Set(Object.keys(STATS.emailState||{}).map(k=>k.split(":")[0]).filter(a=>a.includes("@")))];
+        const list=acc?Object.entries(acc):legacy.map(a=>[a,{ok:true}]);
+        const card=([mail,s])=>`<div class="card"><div class="row" style="cursor:default">
+          <div class="who"><span class="nm">${esc(mail)}</span>
+          <div class="co">${s.ok?"Reading inbox + sent, sorting into tickets, leads and touches":"Login failed: "+esc(s.error||"check the password secret")}</div></div>
+          <span class="chip" style="${s.ok?'':'color:var(--crit)'}">${s.ok?"✓ connected":"✗ broken"}${s.at?" · "+new Date(s.at).toLocaleString(undefined,{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):""}</span>
+        </div></div>`;
+        return (list.map(card).join("")||'<div class="empty">No mailbox connected yet</div>')+
+        `<div class="card"><div class="row" style="cursor:default">
+          <div class="who"><span class="nm">${esc(ORG().supportEmail||"the shared support address")}</span>
+          <div class="co">No own login yet: support mail currently arrives through the connected inboxes, which works. When support@ gets its own IMAP login, an admin adds two secrets and it connects directly.</div></div>
+          <span class="chip">via shared inbox</span>
+        </div></div>`;
+      })()}
+      <h2>AI assistants</h2>
+      <p class="hint">Any assistant that speaks MCP (Claude Desktop, Claude Code, Cursor, LM Studio, or a local Ollama model through Open WebUI) can search this hub: who is this number, what happened with this person, what is due today, what support is waiting. It runs on your own computer, listens on no network port, and uses a read-only login, so nothing can be changed through it. Full instructions: docs/connect-assistant.md in the project folder.</p>
+      <div class="card"><div class="detail" style="display:flex;border-top:0;flex-direction:column">
+        <div class="meta">Where the hub folder sits <b>on the computer you are setting up</b> (Windows: D:\\OrderCubeHub · Mac/Linux: /Users/you/OrderCubeHub):</div>
+        <div class="acts">
+          <input class="li" id="mcp-path" style="flex:1;min-width:240px" value="${esc(localStorage.getItem("hub_mcp_path")||"D:\\OrderCubeHub")}" oninput="mcpPath()">
+          <span class="meta" id="mcp-os"></span>
+        </div>
+        <div class="meta" style="margin-top:6px">Claude Desktop: Settings → Developer → Edit Config, paste this:</div>
+        <pre id="mcp-json" style="background:var(--chipbg);border-radius:8px;padding:10px;font-size:12px;overflow-x:auto;margin:6px 0"></pre>
+        <div class="acts">
+          <button class="btn" onclick="copyTxt(document.getElementById('mcp-json').textContent,'the Claude Desktop config')">📋 Copy config</button>
+          <button class="btn" onclick="copyTxt(document.getElementById('mcp-cli').textContent,'the Claude Code command')">📋 Copy Claude Code command</button>
+        </div>
+        <div class="meta" style="margin-top:6px">Claude Code, one line in a terminal: <code id="mcp-cli"></code></div>
+        <div class="meta">Cursor and LM Studio take the same JSON. Open WebUI (Ollama) takes command <code>node</code> plus the file path. Every computer needs Node.js and one <code>npm install</code> inside the mcp folder, described in docs/connect-assistant.md.</div>
+        <div class="meta">ChatGPT connects only to internet-hosted MCP servers, so it needs the hosted variant. Ask Claude when the team wants it.</div>
+      </div></div>
+      ${window.PROFILE && PROFILE.role==="admin" ? usersAdmin() : ""}`;
+    }
+  },
+  support: {
+    title:"Support", count:()=>((window.__tickets)||[]).filter(t=>t.state!=="resolved"&&!t.junked).length,
+    render(){
+      const ts=(window.__tickets||[]);
+      const q=(document.getElementById("q").value||"").toLowerCase().trim();
+      const S=window.__SUP||(window.__SUP={lang:"all",days:"all",mine:false});
+      const f=t=>{
+        if(t.junked) return false;
+        if(q && ![t.customer_name,t.customer_email,t.subject].some(v=>(v||"").toLowerCase().includes(q))) return false;
+        if(S.lang!=="all" && t.language!==S.lang) return false;
+        if(S.days!=="all" && daysAgo(new Date(String(t.opened_at).slice(0,10)+"T00:00:00"))>S.days) return false;
+        if(S.mine && !(t.assignees||[]).includes(ME)) return false;
+        if(S.un && (t.assignees||[]).length) return false;
+        return true;
+      };
+      const sf=(k,v,lb)=>`<button class="fbtn ${String(S[k])===String(v)?'active':''}" onclick="supF('${k}','${v}')">${lb}</button>`;
+      const byAct=(a,b)=>new Date(b.last_activity_at)-new Date(a.last_activity_at);
+      const open=ts.filter(t=>["new","waiting_us"].includes(t.state)&&f(t)).sort(byAct);
+      const wait=ts.filter(t=>t.state==="waiting_customer"&&f(t)).sort(byAct);
+      const res=ts.filter(t=>t.state==="resolved"&&f(t)).sort(byAct).slice(0,15);
+      const NAMES={new:"New",waiting_us:"Waiting on us",waiting_customer:"Waiting on customer",resolved:"Resolved"};
+      const row=t=>{
+        const last=daysAgo(new Date(String(t.last_activity_at).slice(0,10)+"T00:00:00"));
+        const age=daysAgo(new Date(String(t.opened_at).slice(0,10)+"T00:00:00"));
+        const stale=["new","waiting_us"].includes(t.state)&&last>=2;
+        const lead=t.person_id&&byId[t.person_id];
+        const phone=lead&&lead.phone||"";
+        const msgs=(window.__tmsgs||{})[t.id]||[];
+        const isOpen=(window.__openT||new Set()).has(t.id);
+        const thread=msgs.map(m=>`<div class="noteitem ${m.direction==="out"?"tout":""}">
+            <span class="meta">${esc(String(m.at).slice(0,10))} · ${m.direction==="out"?"→ we replied ("+esc((m.from_email||"").split("@")[0])+")":"← "+esc(m.from_name||m.from_email||"")}${m.cc_emails?" · cc: "+esc(m.cc_emails):""}</span><br>
+            ${esc(m.snippet||"(no text preview)")}</div>`).join("");
+        return `<div class="card ${isOpen?'open':''}"><div class="row" onclick="toggleT(${t.id})">
+          <div class="who"><span class="nm">${esc(t.customer_name||t.customer_email||"?")}</span>
+            <div class="co">${esc(t.subject||"")}</div></div>
+          <span class="chip" style="cursor:${window.CANW!==false?'pointer':'default'}" title="Detected from the first message body. Wrong? Click to flip DE/EN." onclick="${window.CANW!==false?`langFlip(${t.id});event.stopPropagation()`:''}">${t.language==="de"?"🇩🇪 DE":"🇬🇧 EN"}</span>
+          ${msgs.length?`<span class="badge-t">${msgs.length}✉</span>`:""}
+          ${lead?`<span class="chip stage" title="Also a sales lead">lead ✦</span>`:""}
+          ${(t.assignees||[]).length?`<span class="chip asg" title="Assigned to ${esc((t.assignees||[]).join(", "))}">👤 ${(t.assignees||[]).map(a=>esc(String(a).split("@")[0])).join(" + ")}</span>`:""}
+          ${window.CANW!==false?`<select class="st" onchange="assignT(${t.id},this.value);this.selectedIndex=0" onclick="event.stopPropagation()" title="Assign or unassign (picking an assigned person removes them)">
+            <option value="">👤 Assign…</option>
+            <option value="__me">→ me</option>
+            ${(window.__users||[]).filter(u=>u.email!==ME).map(u=>`<option value="${esc(u.email)}">${esc(u.name||u.email.split("@")[0])}${(t.assignees||[]).includes(u.email)?" ✓":""}</option>`).join("")}
+            ${(t.assignees||[]).length?`<option value="__clear">✗ Clear all</option>`:""}
+          </select>`:""}
+          <select class="st" ${window.CANW===false?"disabled":""} onchange="setTicketState(${t.id},this.value)" onclick="event.stopPropagation()">
+            ${Object.entries(NAMES).map(([s,n])=>`<option value="${s}" ${t.state===s?"selected":""}>${n}</option>`).join("")}
+          </select>
+          <button class="btn" onclick="copyTxt('${esc(t.customer_email||"")}','email');event.stopPropagation()" title="Copy email for your webmail reply">📋 ✉</button>
+          ${phone?`<button class="btn" onclick="copyTxt('${esc(phone)}','phone number');event.stopPropagation()" title="Copy phone for Placetel">📋 ☎</button>`
+                 :`<span class="chip" style="opacity:.55" title="No phone on file for this customer yet. Attach a number via ⇄ Merge or the Unmatched tray and the copy button appears here.">☎ none</span>`}
+          <span class="meta ${stale?'quiet':''}">${last===0?"active today":last+"d silent"} · opened ${age}d ago</span>
+        </div>
+        <div class="detail" style="display:${isOpen?'flex':'none'};flex-direction:column">
+          <div class="notelog" style="max-height:320px">${thread||'<div class="meta">No message content stored for this thread yet (older thread; new mails will appear here automatically).</div>'}</div>
+          ${window.CANW!==false?`<div class="acts" style="margin-top:8px">
+            <select class="st" onchange="ticketReclass(${t.id},this.value);this.selectedIndex=0" onclick="event.stopPropagation()" title="Wrongly sorted into Support? Move it out.">
+              <option value="">↪ Not support…</option>
+              <option value="lead">→ Sales lead (partnership, enquiry)</option>
+              <option value="junk">🗑 Junk, delete thread</option>
+            </select>
+          </div>`:""}
+        </div></div>`;
+      };
+      const junked=ts.filter(t=>t.junked).sort(byAct);
+      const jrow=t=>`<div class="card"><div class="row" style="cursor:default">
+        <div class="who"><span class="nm">${esc(t.customer_name||t.customer_email||"?")}</span><div class="co">${esc(t.subject||"")}</div></div>
+        ${window.CANW!==false?`<button class="btn" onclick="junkRestore(${t.id})">↩ Restore</button>
+        <button class="btn" onclick="junkForever(${t.id})" title="Permanent, no undo">🗑 Delete forever</button>`:""}
+      </div></div>`;
+      return `<p class="hint">Sorted automatically from support@ mail (history backfilled). Threads are grouped; when anyone from the team replies, the ticket flips to "waiting on customer" by itself. Orange = 2+ days silent while it's our move.</p>
+      <div class="filters">${sf("lang","all","All languages")}${sf("lang","en","🇬🇧 English")}${sf("lang","de","🇩🇪 German")}
+        <button class="fbtn ${S.mine?'active':''}" onclick="supMine()" title="Only tickets assigned to you">👤 Mine</button>
+        <button class="fbtn ${S.un?'active':''}" onclick="supUn()" title="Only tickets nobody has picked up yet">Unassigned</button>
+        ${window.CANW!==false?`<button class="fbtn" onclick="newTicket()" title="Open a ticket by hand: phone complaint, walk-in, anything that did not arrive by mail">＋ New ticket</button>`:""}
+        <span style="flex:1"></span>${sf("days","all","All time")}${sf("days",30,"Opened ≤30d")}${sf("days",7,"Opened ≤7d")}</div>
+      <h2>Waiting on us (${open.length})</h2>${open.map(row).join("")||'<div class="empty">Inbox zero 🎉</div>'}
+      <h2>Waiting on customer (${wait.length})</h2>${wait.map(row).join("")||'<div class="empty">Nothing pending</div>'}
+      <h2>Recently resolved</h2>${res.map(row).join("")||'<div class="empty">None yet</div>'}
+      <details class="tbl" ${junked.length?"":"style='display:none'"}><summary>🗑 Junked (${junked.length}): hidden threads, restore or delete forever</summary>
+      ${junked.map(jrow).join("")||'<div class="meta" style="padding:8px">Nothing junked</div>'}</details>`;
+    }
+  },
+  people: {
+    title:"People", count:()=>LEADS.length+((window.__extraPeople||[]).length),
+    render(){
+      const q=(document.getElementById("q").value||"").toLowerCase().trim();
+      let arr=LEADS.filter(l=>!q||matchLead(l,q));
+      let extras=(window.__extraPeople||[]).filter(p=>!q||[p.name,p.email].some(v=>(v||"").toLowerCase().includes(q)));
+      const F=window.__PF||"all";
+      const counts={all:arr.length+extras.length,lead:0,client:0,support:0};
+      arr.forEach(l=>counts[lifecycleOf(l)]++);
+      extras.forEach(p=>counts[p.pseudo==="client"?"client":"support"]++);
+      if(F!=="all"){
+        arr=arr.filter(l=>lifecycleOf(l)===F);
+        extras=extras.filter(p=>(p.pseudo==="client"?"client":"support")===F);
+      }
+      arr=[...arr].sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+      extras=[...extras].sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+      const fb=(id,lb)=>`<button class="fbtn ${F===id?'active':''}" onclick="setPF('${id}')">${lb}</button>`;
+      const prow=p=>`<div class="card"><div class="row" onclick="jumpSearch('${p.pseudo==="client"?"clients":"support"}','${esc(p.email||p.name)}')">
+        <div class="who"><span class="nm">${p.pseudo==="client"?"💰":"🎧"} ${esc(p.name)}</span><div class="co">${esc(p.email||"")}</div></div>
+        <span class="chip ${p.pseudo==="client"?"life-client":""}">${p.pseudo==="client"?"client, Stripe only":"support-only"}</span>
+        <span class="meta">${esc(p.sub||"")} →</span>
+      </div></div>`;
+      const CAP=300;
+      const rows=[...arr.map(l=>({n:(l.name||"").toLowerCase(), h:()=>leadRow(l,{txt:lifecycleOf(l)==="client"?"client":lifecycleOf(l)==="support"?"support-only":"lead"})})),
+                  ...extras.map(p=>({n:(p.name||"").toLowerCase(), h:()=>prow(p)}))].sort((a,b)=>a.n.localeCompare(b.n));
+      return `<p class="hint">Everyone the hub knows, one entry per human, whatever the source: Salesforce, coupons, email, Stripe, support mail, manual. Slim cards mean the person exists only in Stripe or the support inbox so far; click them to jump to their data.</p>
+      <div class="filters">${fb("all","All · "+counts.all)}${fb("lead","✦ Leads · "+counts.lead)}${fb("client","💰 Clients · "+counts.client)}${fb("support","🎧 Support-only · "+counts.support)}${selBtn()}</div>
+      ${selBar(arr.map(l=>l.id))}
+      ${rows.slice(0,CAP).map(r=>r.h()).join("")||'<div class="empty">Nobody matches</div>'}
+      ${rows.length>CAP?`<p class="hint">Showing the first ${CAP} of ${rows.length}; use the search box to narrow down.</p>`:""}`;
+    }
+  },
+  trays: {
+    title:"Unmatched", count:()=>((window.__trayMail||[]).filter(x=>!x.dismissed).length + (window.__trayCalls||[]).filter(x=>!x.dismissed).length)||"",
+    render(){
+      const q=(document.getElementById("q").value||"").toLowerCase().trim();
+      const W=window.CANW!==false;
+      const calls=(window.__trayCalls||[]).filter(r=>!q||r.phone.toLowerCase().includes(q)||phoneHit(q,r.phone));
+      const mails=(window.__trayMail||[]).filter(r=>!q||[r.email,r.name,r.last_subject].some(v=>(v||"").toLowerCase().includes(q)));
+      const callRow=r=>`<div class="card"><div class="row" style="cursor:default">
+        <div class="who"><span class="nm">📞 ${esc(r.phone)}</span>
+          <div class="co">${r.cnt||1} call${(r.cnt||1)>1?"s":""}${r.last_at?" · last "+new Date(r.last_at).toLocaleDateString():""}</div></div>
+        ${W?`<button class="btn" onclick="trayAssign('call','${esc(r.phone)}')">→ Assign to person</button>
+        <button class="btn" onclick="trayLead('call','${esc(r.phone)}')">+ New lead</button>
+        <button class="btn" onclick="trayDismiss('call','${esc(r.phone)}',${r.dismissed?"false":"true"})">${r.dismissed?"↩ Restore":"✗ Dismiss"}</button>`:""}
+      </div></div>`;
+      const mailRow=r=>`<div class="card"><div class="row" style="cursor:default">
+        <div class="who"><span class="nm">✉️ ${esc(r.name||r.email)}</span>
+          <div class="co">${esc(r.email)} · ${esc((r.last_subject||"").slice(0,70))} · ${r.cnt||1} mail${(r.cnt||1)>1?"s":""}${r.last_at?" · last "+new Date(r.last_at).toLocaleDateString():""}</div></div>
+        ${W?`<button class="btn" onclick="trayAssign('mail','${esc(r.email)}')">→ Assign to person</button>
+        <button class="btn" onclick="trayLead('mail','${esc(r.email)}')">+ New lead</button>
+        <button class="btn" onclick="trayTicket('${esc(r.email)}')">+ Ticket</button>
+        <button class="btn" onclick="trayDismiss('mail','${esc(r.email)}',${r.dismissed?"false":"true"})">${r.dismissed?"↩ Restore":"✗ Dismiss"}</button>`:""}
+      </div></div>`;
+      const aC=calls.filter(r=>!r.dismissed).sort((a,b)=>(b.cnt||0)-(a.cnt||0));
+      const aM=mails.filter(r=>!r.dismissed);
+      const dC=calls.filter(r=>r.dismissed), dM=mails.filter(r=>r.dismissed);
+      return `<p class="hint">Calls and mails the hub could not match to anyone. Attach them to the right person, promote them to a lead or ticket, or dismiss. Nothing is thrown away: dismissed entries stay in the list at the bottom.</p>
+      <h2>📞 Unmatched call numbers (${aC.length})</h2>
+      ${aC.map(callRow).join("")||'<div class="empty">Tray is empty. Unmatched numbers appear after the next <b>import-calls.cmd</b> run.</div>'}
+      <h2>✉️ Unknown email senders (${aM.length})</h2>
+      ${aM.map(mailRow).join("")||'<div class="empty">No unknown senders 🎉</div>'}
+      <details class="tbl"><summary>Dismissed (${dC.length+dM.length}): kept here forever, restore any time</summary>
+      ${[...dC.map(callRow),...dM.map(mailRow)].join("")||'<div class="meta" style="padding:8px">Nothing dismissed yet</div>'}</details>`;
+    }
+  }
+};
+window.setPF = f => { window.__PF=f; render(false); };
+
+/* ---------- users admin (settings, admins only) ---------- */
+const TABKEYS=["today","fresh","followups","coupons","funnel","clients","support","people","trays"];
+function usersAdmin(){
+  const users=window.__users||[];
+  const urow=u=>{ const isMe=u.email===ME; const dis=isMe?"disabled":"";
+    const meTitle="You cannot change your own access, ask another user-manager. That way nobody can lock themselves out again.";
+    return `<div class="card"><div class="row" style="cursor:default">
+    <div class="who"><span class="nm">${esc(u.name||u.email.split("@")[0])}</span><div class="co">${esc(u.email)}</div></div>
+    <label class="chip" style="cursor:${isMe?"not-allowed":"pointer"}" title="${isMe?meTitle:"May change data: statuses, notes, logs, tickets, merges, trays. Off = read-only."}">
+      <input type="checkbox" ${u.can_write?"checked":""} ${dis} onchange="uSet('${esc(u.email)}','can_write',this.checked)"> can edit data</label>
+    <label class="chip" style="cursor:${isMe?"not-allowed":"pointer"}" title="${isMe?meTitle:"May manage users here and always sees every tab."}">
+      <input type="checkbox" ${u.role==="admin"?"checked":""} ${dis} onchange="uSet('${esc(u.email)}','role',this.checked?'admin':'operator')"> manages users</label>
+    <label class="chip" title="Placetel extension (e.g. 25). Used by the CSV import to attribute calls.">☎ ext
+      <input class="li" style="width:48px;padding:2px 6px;font-size:12px" value="${esc(u.placetel_ext||"")}" onchange="uSet('${esc(u.email)}','placetel_ext',this.value.trim()||null)"></label>
+    <label class="chip" title="Placetel SIP peer of this person${ORG().peerExample?" (looks like "+ORG().peerExample+")":""}. The live call feed uses it to attribute calls; ask Claude to read it out of the events after their first call.">📟 peer
+      <input class="li" style="width:150px;padding:2px 6px;font-size:12px" value="${esc(u.placetel_peer||"")}" onchange="uSet('${esc(u.email)}','placetel_peer',this.value.trim()||null)"></label>
+    ${isMe?'<span class="chip">you</span>':`<button class="btn" onclick="uDel('${esc(u.email)}')" title="Remove from the hub">🗑</button>`}
+    <div style="width:100%;display:flex;gap:4px;flex-wrap:wrap">
+      ${TABKEYS.map(k=>`<label class="chip" style="cursor:pointer" title="Tab visible for this user (user-managers always see everything)"><input type="checkbox" ${(u.tabs||[]).includes(k)?"checked":""} onchange="uTab('${esc(u.email)}','${k}',this.checked)"> ${PANELS[k]?PANELS[k].title:k}</label>`).join("")}
+    </div>
+  </div></div>`;};
+  return `<h2>Users</h2>
+  <p class="hint">Two switches per person: "can edit data" (off = read-only viewer) and "manages users" (this panel + every tab). Tab checkboxes control what everyone else sees. Adding a row sets permissions; the login itself is created separately by an admin (public sign-ups are off).</p>
+  ${users.map(urow).join("")||'<div class="empty">No users yet</div>'}
+  <div class="card"><div class="row" style="cursor:default">
+    <input class="li" id="nu-email" placeholder="name@${esc(ORG().mailDomain||"company.tld")}" style="min-width:200px">
+    <input class="li" id="nu-name" placeholder="Name">
+    <label class="chip" style="cursor:pointer"><input type="checkbox" id="nu-write" checked> can edit data</label>
+    <label class="chip" style="cursor:pointer"><input type="checkbox" id="nu-admin"> manages users</label>
+    <button class="btn primary" onclick="uAdd()">+ Add user</button>
+  </div></div>`;
+}
+async function uSave(email, patch){
+  const u=(window.__users||[]).find(x=>x.email===email);
+  if(u) Object.assign(u,patch);
+  render(false);
+  const {error}=await sb.from("app_users").update(patch).eq("email",email);
+  if(error) hubAlert("Save failed", esc(error.message)); else toast("Saved ✓");
+}
+window.uSet=(email,k,v)=>uSave(email,{[k]:v});
+window.uTab=(email,k,on)=>{
+  const u=(window.__users||[]).find(x=>x.email===email); if(!u) return;
+  let t=Array.isArray(u.tabs)?[...u.tabs]:[];
+  if(on){ if(!t.includes(k)) t.push(k); } else t=t.filter(x=>x!==k);
+  u.tabs=t; uSave(email,{tabs:t});
+};
+window.uAdd=async()=>{
+  const em=(document.getElementById("nu-email").value||"").trim().toLowerCase();
+  const nm=(document.getElementById("nu-name").value||"").trim();
+  const isAdmin=document.getElementById("nu-admin").checked;
+  const canWrite=document.getElementById("nu-write").checked;
+  if(!/^\S+@\S+\.\S+$/.test(em)){ toast("Enter a valid email first"); return; }
+  const rec={email:em, name:nm||null, role:isAdmin?"admin":"operator", can_write:canWrite, tabs:[...TABKEYS]};
+  const {error}=await sb.from("app_users").insert(rec);
+  if(error){ hubAlert("Add failed", esc(error.message)); return; }
+  (window.__users=window.__users||[]).push(rec);
+  toast("User added ✓, their login is created separately by an admin"); render(false);
+};
+window.uDel=async em=>{
+  if(!await hubConfirm("Remove "+esc(em)+" from the hub?","They lose all access rules; the login account itself is removed separately.","Remove")) return;
+  const {error}=await sb.from("app_users").delete().eq("email",em);
+  if(error){ hubAlert("Delete failed", esc(error.message)); return; }
+  window.__users=(window.__users||[]).filter(u=>u.email!==em);
+  toast("Removed"); render(false);
+};
+
+/* ---------- shell ---------- */
+let CURRENT="today";
+/* Rendering is defensive: one broken panel or counter can never blank the page.
+   Errors draw an error card with a copy button instead. */
+function errCard(where, err){
+  console.error(where+" failed:", err);
+  window.__lastErr = where+": "+String(err && err.stack || err);
+  return `<div class="errbar"><b>This view hit an error and could not draw.</b> The rest of the app still works: switch tabs or reload data.
+    <code>${esc(window.__lastErr)}</code>
+    <div class="acts" style="margin-top:8px">
+      <button class="btn" onclick="copyTxt(window.__lastErr,'error details')">📋 Copy error</button>
+      <button class="btn" onclick="refreshData()">⟳ Reload data</button>
+    </div>
+    <p class="hint">Paste the copied error to Claude and it gets fixed.</p></div>`;
+}
+function render(){
+  if(!PANELS[CURRENT]) CURRENT="today";
+  const nav=document.getElementById("nav");
+  const cnt=p=>{ try{ return p.count(); }catch(e){ console.error("count failed:",e); return "!"; } };
+  try{
+    nav.innerHTML=`<div class="brand">OrderCube Hub<small>sales &amp; support</small></div>`+
+      Object.entries(PANELS).filter(([k,p])=>!p.hidden &&
+        (!window.PROFILE || PROFILE.role==="admin" || (PROFILE.tabs||[]).includes(k))).map(([k,p])=>
+        `<button class="navbtn ${k===CURRENT?'active':''}" onclick="go('${k}')">${p.title}<span class="cnt">${cnt(p)}</span></button>`).join("")+
+      `<div class="navfoot">
+        ${(()=>{try{
+          const bad=healthProblems();
+          const acc=STATS.emailAccounts, mine=acc?acc[ME]:null;
+          const lines=[];
+          if(bad.length) lines.push(`<a onclick="go('settings')" style="color:${bad.some(b=>b.state==="bad")?"var(--crit)":"var(--serious)"}" title="${esc(bad.map(b=>b.n+": "+b.msg).join(" · "))}">⚠ ${bad.length===1?bad[0].n+" sync "+(bad[0].state==="bad"?"failing":"stale"):bad.length+" syncs need attention"}</a>`);
+          if(acc && !mine) lines.push(`<a onclick="go('settings')" style="color:var(--serious)" title="Open Settings → Mailboxes">⚠ your mailbox is not connected</a>`);
+          else if(mine && !mine.ok) lines.push(`<a onclick="go('settings')" style="color:var(--crit)" title="${esc(mine.error||"")}">⚠ your mailbox login is broken</a>`);
+          return lines.length?lines.join("<br>")+"<br>":"";
+        }catch(e){return "";}})()}
+        <a onclick="cycleTheme()" title="Switch between auto (follows your system), light and dark">◐ Theme: ${localStorage.getItem("hub_theme")||"auto"}</a><br>
+        <a onclick="go('settings')" title="Open settings">⚙️ ${esc(ME||"Settings")}</a><br>
+        <span title="When a sync engine last wrote data into the hub. The page keeps itself up to date on its own.">Data: ${(()=>{try{const r=(window.__syncRuns||[])[0]; const d=r?r.ran_at:STATS.refreshedAt; return d? new Date(d).toLocaleString(undefined,{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"?";}catch(e){return "?";}})()}</span>
+        ${window.CANW!==false?`<br><a onclick="syncNow()" title="Go and fetch new data from Salesforce, the mailboxes, Stripe, Placetel and the coupon panel right now, instead of waiting for the next half-hour run">⚡ Sync now</a> · `:"<br>"}<a onclick="refreshData()" title="Show the newest data that is already in the hub (happens automatically every few minutes anyway)">⟳ reload</a></div>`;
+  }catch(e){ console.error("nav failed:", e); }
+  try{ document.getElementById("title").textContent=PANELS[CURRENT].title; }catch(e){}
+  let html;
+  try{ html=(PANELS[CURRENT].filterable?viewbar():"")+PANELS[CURRENT].render(); }
+  catch(err){ html=errCard("Tab \""+CURRENT+"\"", err); }
+  document.getElementById("content").innerHTML = html || errCard("Tab \""+CURRENT+"\"", "panel returned nothing");
+  try{ applyFolds(); }catch(e){ console.error("folds failed:", e); }
+  try{ if(document.getElementById("mcp-path")) mcpPath(); }catch(e){}
+  try{
+    const n=activeFilterCount();
+    document.getElementById("hctl").innerHTML = viewsSel() +
+      (n?`<button class="fbtn active" onclick="showFilters()" title="See in plain words what is narrowing your view">👁 ${n} filter${n>1?"s":""}</button>
+          <button class="fbtn active" onclick="resetFilters()" title="Reset all filters in one click">✕</button>`:"");
+    const qc=document.getElementById("qclear");
+    if(qc) qc.style.display=(document.getElementById("q").value||"")?"block":"none";
+  }catch(e){}
+}
+window.go=k=>{CURRENT=k;FILTER="all";if(k!=="settings")window.__lastTab=k;render();window.scrollTo(0,0);};
+window.jump=id=>{const el=document.getElementById(id); if(el) el.scrollIntoView({behavior:"smooth"});};
+window.goFiltered=(k,f)=>{CURRENT=k;FILTER=f;render();window.scrollTo(0,0);};
+
+/* every section headline folds on click; what you fold stays folded on this device */
+function applyFolds(){
+  const key="hub_folds_"+CURRENT;
+  let folds={}; try{ folds=JSON.parse(localStorage.getItem(key)||"{}"); }catch(e){}
+  document.querySelectorAll("#content h2").forEach(h=>{
+    const id=h.textContent.replace(/[\d(),·]+/g,"").trim();
+    const folded=!!folds[id];
+    h.classList.add("foldable"); h.classList.toggle("folded",folded);
+    h.title="Click to "+(folded?"unfold":"fold")+" this section";
+    let el=h.nextElementSibling;
+    while(el && el.tagName!=="H2"){ el.style.display=folded?"none":""; el=el.nextElementSibling; }
+    h.onclick=()=>{
+      folds[id]=!folds[id];
+      localStorage.setItem(key,JSON.stringify(folds));
+      render(false);
+    };
+  });
+}
+
+/* runtime errors (clicks, async saves) surface as a dismissible card instead of dying silently */
+function showErr(msg){
+  window.__lastErr=String(msg);
+  let b=document.getElementById("errtoast");
+  if(!b){ b=document.createElement("div"); b.id="errtoast"; b.className="errbar";
+    b.style.cssText="position:fixed;bottom:16px;right:16px;max-width:420px;z-index:98;margin:0";
+    document.body.appendChild(b); }
+  b.innerHTML=`<b>Something went wrong</b><code>${esc(String(msg))}</code>
+    <div class="acts" style="margin-top:6px">
+      <button class="btn" onclick="copyTxt(window.__lastErr,'error details')">📋 Copy</button>
+      <button class="btn" onclick="document.getElementById('errtoast').remove()">Dismiss</button></div>`;
+}
+window.addEventListener("error", e=>showErr((e.message||"Script error")+(e.filename?"  ("+String(e.filename).split("/").pop()+":"+e.lineno+")":"")));
+window.addEventListener("unhandledrejection", e=>showErr("Async: "+((e.reason&&(e.reason.message||e.reason))||"unknown")));
+
+/* ---------- global search: one box finds people, clients and tickets everywhere ---------- */
+function renderQDrop(){
+  const box=document.getElementById("qdrop"); if(!box) return;
+  const q=(document.getElementById("q").value||"").toLowerCase().trim();
+  if(q.length<2){ box.style.display="none"; box.innerHTML=""; return; }
+  const hits=[];
+  try{
+    for(const l of LEADS){
+      if(hits.length>=12) break;
+      if(matchLead(l,q)){
+        const life=lifecycleOf(l);
+        hits.push({tag:life==="client"?"client":life==="support"?"person":"lead",
+          h:`<b>${esc(l.name||l.email)}</b> <span class="meta">${esc(l.co||l.email||l.phone||"")}</span>`,
+          act:"openPerson('"+l.id+"')"});
+      }
+    }
+    for(const t of (window.__tickets||[])){
+      if(hits.length>=17) break;
+      if([t.subject,t.customer_name,t.customer_email].some(v=>(v||"").toLowerCase().includes(q)))
+        hits.push({tag:"ticket", h:`<b>${esc(t.customer_name||t.customer_email||"?")}</b> <span class="meta">${esc((t.subject||"").slice(0,60))}</span>`,
+          act:"openTicket("+t.id+")"});
+    }
+    for(const cl of (window.__clients||[])){
+      if(hits.length>=20) break;
+      if(cl.person_id && byId[cl.person_id]) continue;
+      if([cl.name,cl.email].some(v=>(v||"").toLowerCase().includes(q)))
+        hits.push({tag:"client", h:`<b>${esc(cl.name||cl.email)}</b> <span class="meta">${esc(eur(cl.total_paid,cl.currency))}</span>`,
+          act:"jumpSearch('clients','"+esc((cl.email||cl.name||"").replace(/'/g,""))+"')"});
+    }
+  }catch(e){ console.error("search failed:",e); }
+  box.innerHTML=hits.map(x=>`<div class="qhit" onclick="${x.act};qClose()"><span class="tag">${x.tag}</span><div style="flex:1">${x.h}</div></div>`).join("")
+    || '<div class="qhit"><span class="meta">No match anywhere in the hub</span></div>';
+  box.style.display="block";
+}
+window.qClose=()=>{ const b=document.getElementById("qdrop"); if(b){ b.style.display="none"; } };
+window.openPerson=id=>{
+  const l=byId[id]; if(!l) return;
+  CURRENT="people"; FILTER="all"; window.__PF="all";
+  document.getElementById("q").value=l.email||l.phone||l.name||"";
+  render(); window.scrollTo(0,0);
+  const card=document.querySelector(`.card[data-id="${id}"]`);
+  if(card){ card.classList.add("open"); card.scrollIntoView({behavior:"smooth",block:"center"}); }
+};
+window.openTicket=id=>{
+  (window.__openT||(window.__openT=new Set())).add(id);
+  const t=(window.__tickets||[]).find(x=>x.id===id);
+  CURRENT="support";
+  document.getElementById("q").value=(t&&(t.customer_email||t.customer_name))||"";
+  render(); window.scrollTo(0,0);
+};
+const qEl=document.getElementById("q");
+qEl.addEventListener("input",()=>{ render(false); renderQDrop(); });
+qEl.addEventListener("keydown",e=>{ if(e.key==="Escape") qClose(); });
+document.addEventListener("click",e=>{ if(!e.target.closest(".qwrap")) qClose(); });
+
+/* ---------- auth ---------- */
+window.doLogin = async ev => {
+  ev.preventDefault();
+  const err=document.getElementById("lerr"); err.textContent="";
+  const {error} = await sb.auth.signInWithPassword({
+    email: document.getElementById("lemail").value.trim(),
+    password: document.getElementById("lpass").value
+  });
+  if(error){ err.textContent = error.message; return; }
+  boot();
+};
+window.signOut = async () => { await sb.auth.signOut(); location.reload(); };
+window.supF = (k,v) => { const S=window.__SUP||(window.__SUP={}); S[k]=(v==="30"||v==="7")?+v:v; render(false); };
+window.supMine = () => { const S=window.__SUP||(window.__SUP={}); S.mine=!S.mine; if(S.mine) S.un=false; render(false); };
+window.supUn = () => { const S=window.__SUP||(window.__SUP={}); S.un=!S.un; if(S.un) S.mine=false; render(false); };
+window.newCoupon = pid => {
+  if(window.CANW===false) return;
+  const l=pid?byId[pid]:null;
+  const d=new Date(TODAY); d.setDate(d.getDate()+14);
+  const dflt=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  let ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  ov=document.createElement("div"); ov.id="mergeov";
+  const CO=[["","—"],["de","Germany"],["at","Austria"],["ch","Switzerland"],["gb","United Kingdom"],["ie","Ireland"],
+    ["us","USA"],["ca","Canada"],["au","Australia"],["nz","New Zealand"],["nl","Netherlands"],["be","Belgium"],
+    ["fr","France"],["es","Spain"],["pt","Portugal"],["it","Italy"],["pl","Poland"],["cz","Czechia"],
+    ["dk","Denmark"],["se","Sweden"],["no","Norway"],["fi","Finland"],["gr","Greece"],["tr","Turkey"],
+    ["ae","UAE"],["sa","Saudi Arabia"],["qa","Qatar"],["za","South Africa"],["sg","Singapore"]];
+  const opts=(arr,sel)=>arr.map(([v,t])=>`<option value="${esc(v)}" ${v===sel?"selected":""}>${esc(t)}</option>`).join("");
+  ov.innerHTML=`<div class="mcard" style="width:600px">
+    <h3>🎟 Create a coupon</h3>
+    <div class="meta">Same form the admin panel uses: it issues the code, emails it if you ask, and reminds the customer 3 days and 1 day before it expires.</div>
+
+    <div class="acts">
+      <select class="st" id="nc-type" onchange="ncType()">${opts([["percentage","Percentage (%)"],["fixed","Fixed (cents)"],["free_shipping","Free shipping"]])}</select>
+      <label class="chip">value <input class="li" id="nc-value" type="number" min="1" value="10" style="width:78px;padding:2px 6px"></label>
+      <span class="meta" id="nc-vhint">percentage points</span>
+    </div>
+    <div class="acts">
+      <select class="st" id="nc-lang">${opts([["en","🇬🇧 English"],["de","🇩🇪 Deutsch"]])}</select>
+      <label class="chip">expires <input class="li" id="nc-exp" type="date" value="${dflt}" style="padding:2px 6px"></label>
+      <span class="meta">2-week default</span>
+    </div>
+
+    <div class="meta" style="margin-top:6px"><b>Customer</b>, prefilled on the offer page</div>
+    <input class="li" id="nc-name" placeholder="Name" value="${esc((l&&l.name)||"")}">
+    <input class="li" id="nc-email" placeholder="Email" value="${esc((l&&l.email)||"")}">
+    <input class="li" id="nc-phone" placeholder="Phone, e.g. +49 123 456789 (required by the panel)" value="${esc((l&&(l.phone||l.altPhone))||"")}">
+    <div class="acts">
+      <select class="st" id="nc-sal">${opts([["","salutation —"],["mr","Herr"],["ms","Frau"]])}</select>
+      <input class="li" id="nc-company" placeholder="Company (optional)" value="${esc((l&&l.co)||"")}" style="flex:1;min-width:140px">
+      <input class="li" id="nc-vat" placeholder="VAT ID (optional)" style="width:150px">
+    </div>
+
+    <details class="tbl"><summary>Address and offer preconfiguration (optional)</summary>
+      <div class="acts" style="margin-top:6px">
+        <input class="li" id="nc-street" placeholder="Street" style="flex:1;min-width:160px">
+        <input class="li" id="nc-zip" placeholder="ZIP" style="width:90px">
+        <input class="li" id="nc-city" placeholder="City" style="width:130px">
+        <select class="st" id="nc-country">${opts(CO)}</select>
+      </div>
+      <label class="chip" style="cursor:pointer;margin-top:6px"><input type="checkbox" id="nc-del" onchange="ncDel()"> different delivery address</label>
+      <div class="acts" id="nc-delbox" style="display:none;margin-top:6px">
+        <input class="li" id="nc-dstreet" placeholder="Delivery street" style="flex:1;min-width:160px">
+        <input class="li" id="nc-dzip" placeholder="ZIP" style="width:90px">
+        <input class="li" id="nc-dcity" placeholder="City" style="width:130px">
+        <select class="st" id="nc-dcountry">${opts(CO)}</select>
+      </div>
+      <div class="acts" style="margin-top:8px">
+        <label class="chip">OrderCubes <input class="li" id="nc-cubes" type="number" min="0" placeholder="5" style="width:64px;padding:2px 6px"></label>
+        <label class="chip">Tablets <input class="li" id="nc-tablets" type="number" min="0" placeholder="2" style="width:64px;padding:2px 6px"></label>
+        <label class="chip">Smartwatches <input class="li" id="nc-watches" type="number" min="0" placeholder="1" style="width:64px;padding:2px 6px"></label>
+        <select class="st" id="nc-cond">${opts([["","condition —"],["new","New"],["refurbished","Refurbished"]])}</select>
+      </div>
+    </details>
+
+    <label class="chip" style="cursor:pointer"><input type="checkbox" id="nc-mail" checked> send the discount code by email</label>
+    <div class="acts" style="justify-content:flex-end">
+      <button class="btn" onclick="document.getElementById('mergeov').remove()">Cancel</button>
+      <button class="btn primary" onclick="createCoupon('${pid||""}')">Create coupon</button>
+    </div></div>`;
+  ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
+  document.body.appendChild(ov);
+  ov.querySelector(pid?"#nc-value":"#nc-name").focus();
+};
+window.ncType = () => {
+  const t=(document.getElementById("nc-type")||{}).value;
+  const h=document.getElementById("nc-vhint"); if(h) h.textContent = t==="fixed"?"cents, so 500 = 5 €":(t==="free_shipping"?"ignored for free shipping":"percentage points");
+};
+window.ncDel = () => {
+  const on=(document.getElementById("nc-del")||{}).checked;
+  const box=document.getElementById("nc-delbox"); if(box) box.style.display=on?"flex":"none";
+};
+window.createCoupon = async pid => {
+  const g=id=>((document.getElementById(id)||{}).value||"").trim();
+  const num=id=>{ const v=parseInt(g(id),10); return isNaN(v)?null:v; };
+  const email=g("nc-email").toLowerCase();
+  const phone=g("nc-phone");
+  if(!/^\S+@\S+\.\S+$/.test(email)){ toast("Enter a valid email"); return; }
+  if(!phone){ toast("The panel requires a phone number for the customer"); return; }
+  if(!g("nc-name")){ toast("Enter the customer name"); return; }
+  const delOn=!!(document.getElementById("nc-del")||{}).checked;
+  const rec={ person_id: pid||null, email, phone, name:g("nc-name"),
+    discount_type:g("nc-type")||"percentage", value:parseFloat(g("nc-value"))||10,
+    max_uses:1, expiry_date:g("nc-exp")||null, language:g("nc-lang")||"en",
+    salutation:g("nc-sal")||null, company:g("nc-company")||null, vat_id:g("nc-vat")||null,
+    street:g("nc-street")||null, zip:g("nc-zip")||null, city:g("nc-city")||null, country:g("nc-country")||null,
+    del_street:delOn?(g("nc-dstreet")||null):null, del_zip:delOn?(g("nc-dzip")||null):null,
+    del_city:delOn?(g("nc-dcity")||null):null, del_country:delOn?(g("nc-dcountry")||null):null,
+    ordercubes:num("nc-cubes"), tablets:num("nc-tablets"), smartwatches:num("nc-watches"),
+    condition:g("nc-cond")||null,
+    send_email:!!(document.getElementById("nc-mail")||{}).checked, requested_by:ME };
+  const {data,error}=await sb.from("coupon_requests").insert(rec).select("*").single();
+  if(error){ hubAlert("Could not queue the coupon", esc(error.message)); return; }
+  const ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  (window.__couponReqs=window.__couponReqs||[]).unshift(data);
+  render(false);
+  const v=await hubDialog({title:"🎟 Coupon queued",
+    body:"The server creates it in the admin panel on the next sync run. Start one now and it is done in about two minutes.",
+    okLabel:"⚡ Sync now", cancelLabel:"Wait for the next run"});
+  if(v===true) syncNow();
+};
+window.newTicket = pid => {
+  if(window.CANW===false) return;
+  const l=pid?byId[pid]:null;
+  let ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  ov=document.createElement("div"); ov.id="mergeov";
+  ov.innerHTML=`<div class="mcard"><h3>🎫 New support ticket</h3>
+    <input class="li" id="nt2-email" placeholder="Customer email" value="${esc((l&&l.email)||"")}">
+    <input class="li" id="nt2-name" placeholder="Customer name" value="${esc((l&&l.name)||"")}">
+    <input class="li" id="nt2-subj" placeholder="Subject: what is it about?">
+    <select class="st" id="nt2-lang"><option value="en">🇬🇧 English</option><option value="de">🇩🇪 German</option></select>
+    <div class="acts" style="justify-content:flex-end">
+      <button class="btn" onclick="document.getElementById('mergeov').remove()">Cancel</button>
+      <button class="btn primary" onclick="createTicket('${pid||""}')">Create ticket</button>
+    </div></div>`;
+  ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
+  document.body.appendChild(ov);
+  ov.querySelector(pid?"#nt2-subj":"#nt2-email").focus();
+};
+window.createTicket = async pid => {
+  const em=(document.getElementById("nt2-email").value||"").trim().toLowerCase();
+  const nm=(document.getElementById("nt2-name").value||"").trim();
+  const sj=(document.getElementById("nt2-subj").value||"").trim();
+  const lg=document.getElementById("nt2-lang").value;
+  if(!em && !nm){ toast("Enter at least an email or a name"); return; }
+  if(!sj){ toast("Enter a subject"); return; }
+  let person = pid ? byId[pid] : null;
+  if(!person && em) person = LEADS.find(l=>(l.email||"").toLowerCase()===em || (l.alt||"").toLowerCase()===em) || null;
+  const now=new Date().toISOString();
+  const {data,error}=await sb.from("tickets").insert({person_id:person?person.id:null, customer_email:em||null,
+    customer_name:nm||(person&&person.name)||null, subject:sj, channel:"manual", state:"new", language:lg,
+    opened_at:now, last_activity_at:now, assignees:[ME]}).select("*").single();
+  if(error){ hubAlert("Failed", esc(error.message)); return; }
+  const ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  (window.__tickets=window.__tickets||[]).unshift(data);
+  (window.__openT||(window.__openT=new Set())).add(data.id);
+  CURRENT="support"; render(); window.scrollTo(0,0);
+  toast("Ticket created ✓, assigned to you");
+};
+window.langFlip = async id => {
+  if(window.CANW===false) return;
+  const t=(window.__tickets||[]).find(x=>x.id===id); if(!t) return;
+  t.language = t.language==="de" ? "en" : "de";
+  render(false); toast("Language: "+t.language.toUpperCase());
+  const {error}=await sb.from("tickets").update({language:t.language}).eq("id",id);
+  if(error) hubAlert("Save failed", esc(error.message));
+};
+window.ticketReclass = async (id,v) => {
+  if(!v) return;
+  const t=(window.__tickets||[]).find(x=>x.id===id); if(!t) return;
+  if(v==="lead"){
+    if(!await hubConfirm("↪ Not support: turn this into a sales lead?",
+      esc(t.customer_email||t.customer_name||"")+"<br>The thread leaves Support. The person lands in the sales lists with their mail as an email touch, nothing is lost.","Convert to lead")) return;
+    let pid=t.person_id;
+    if(!pid){
+      const em=(t.customer_email||"").toLowerCase();
+      const ex=LEADS.find(l=>(l.email||"").toLowerCase()===em || (l.alt||"").toLowerCase()===em);
+      if(ex) pid=ex.id;
+    }
+    if(!pid){
+      const {data,error}=await sb.from("people").insert({name:t.customer_name||t.customer_email, email:t.customer_email,
+        source:"Reclassified from support", sf_status:"manual", stage:"New"}).select("id").single();
+      if(error){ hubAlert("Failed", esc(error.message)); return; }
+      pid=data.id;
+    }
+    const first=((window.__tmsgs||{})[t.id]||[]).find(m=>m.direction==="in");
+    await sb.from("touches").insert({person_id:pid, kind:"email", at:t.opened_at, by_user:null,
+      detail:t.subject||"Enquiry", snippet:(first&&first.snippet)||null});
+    const {error:de}=await sb.from("tickets").delete().eq("id",id);
+    if(de){ hubAlert("Failed", esc(de.message)); return; }
+    toast("Converted to lead ✓");
+    await loadData(); render();
+  } else if(v==="junk"){
+    if(!await hubConfirm("🗑 Junk this thread?",
+      esc(t.subject||"")+"<br>It moves to the Junked fold at the bottom of Support, restorable any time. Nothing is destroyed unless you later hit \"Delete forever\" there.","Junk it")) return;
+    t.junked=true; render(false); toast("Junked, restorable from the fold below");
+    const {error}=await sb.from("tickets").update({junked:true}).eq("id",id);
+    if(error) hubAlert("Save failed", esc(error.message));
+  }
+};
+window.junkRestore = async id => {
+  const t=(window.__tickets||[]).find(x=>x.id===id); if(!t) return;
+  t.junked=false; render(false); toast("Restored to Support");
+  const {error}=await sb.from("tickets").update({junked:false}).eq("id",id);
+  if(error) hubAlert("Save failed", esc(error.message));
+};
+window.junkForever = async id => {
+  const t=(window.__tickets||[]).find(x=>x.id===id); if(!t) return;
+  if(!await hubConfirm("🗑 Delete this thread forever?", esc(t.subject||"")+"<br>This one really has no undo.","Delete forever")) return;
+  const {error}=await sb.from("tickets").delete().eq("id",id);
+  if(error){ hubAlert("Failed", esc(error.message)); return; }
+  window.__tickets=(window.__tickets||[]).filter(x=>x.id!==id);
+  render(false); toast("Deleted forever");
+};
+window.assignT = async (id,v) => {
+  if(!v) return;
+  const t=(window.__tickets||[]).find(x=>x.id===id); if(!t) return;
+  let a=Array.isArray(t.assignees)?[...t.assignees]:[];
+  if(v==="__clear") a=[];
+  else { const em = v==="__me" ? ME : v;
+    a.includes(em) ? a=a.filter(x=>x!==em) : a.push(em); }
+  t.assignees=a; render(false);
+  toast(a.length ? "Assigned: "+a.map(x=>String(x).split("@")[0]).join(" + ") : "Unassigned");
+  const {error}=await sb.from("tickets").update({assignees:a}).eq("id",id);
+  if(error) hubAlert("Save failed", esc(error.message));
+};
+window.refreshData = async () => { toast("Refreshing from database…"); await loadData(); render(); toast("Up to date ✓"); };
+window.syncNow = async () => {
+  toast("Asking the server to sync…");
+  const {data, error} = await sb.rpc("request_sync");
+  if(error){ hubAlert("Sync could not start", esc(error.message)); return; }
+  if(!data || data.ok===false){ toast((data&&data.message)||"Sync not started"); return; }
+  toast(data.message||"Sync started");
+  // the run takes a couple of minutes; pull the results in automatically
+  setTimeout(async ()=>{ await loadData(); render(); toast("Fresh data loaded ✓"); }, 150000);
+};
+window.setTicketState = async (id, v) => {
+  const t=(window.__tickets||[]).find(x=>x.id===id);
+  if(t){ t.state=v; }
+  render(false); toast("Ticket → "+v.replace(/_/g," "));
+  const patch={state:v}; if(v==="resolved") patch.resolved_at=new Date().toISOString();
+  const {error} = await sb.from("tickets").update(patch).eq("id",id);
+  if(error) hubAlert("Save failed", esc(error.message));
+};
+async function savePrefs(){
+  const {error} = await sb.from("user_prefs").upsert({email: ME, prefs: window.__PREFS||{}, updated_at: new Date().toISOString()});
+  if(error) hubAlert("Save failed", esc(error.message));
+  return !error;
+}
+window.saveMyDefaults = async () => {
+  window.__PREFS = Object.assign({}, window.__PREFS, { view: VIEW, support: window.__SUP || {}, tab: window.__lastTab || "today" });
+  if(await savePrefs()) toast("Saved: this login now starts with this view, on every device");
+};
+
+/* ---------- named views: personal filter+tab snapshots ---------- */
+function viewsSel(){
+  const vs=(window.__PREFS&&window.__PREFS.views)||{};
+  const names=Object.keys(vs).sort();
+  return `<select class="st" onchange="viewAction(this.value);this.selectedIndex=0" title="Your saved views: filters, sort and tab in one click. Personal to your login.">
+    <option value="">👁 ${esc(window.__curView||"Views…")}</option>
+    ${names.map(n=>`<option value="v:${esc(n)}">${esc(n)}${n===window.__curView?" ✓":""}</option>`).join("")}
+    <option value="__save">＋ Save current as view…</option>
+    ${window.__curView?`<option value="__del">🗑 Delete "${esc(window.__curView)}"</option>`:""}
+  </select>`;
+}
+window.viewAction = async v => {
+  if(!v) return;
+  const P = window.__PREFS = (window.__PREFS||{}); P.views = P.views||{};
+  if(v==="__save"){
+    const name = await hubPrompt("💾 Save current view", {placeholder:"Name, e.g. DACH support or US hot leads", okLabel:"Save view"});
+    if(!name || !String(name).trim()) return;
+    const nm = String(name).trim().slice(0,40);
+    P.views[nm] = { view: VIEW, support: window.__SUP||{}, filter: FILTER, pf: window.__PF||"all", sort: window.SORT||"recent", tab: window.__lastTab||CURRENT };
+    window.__curView = nm;
+    if(await savePrefs()) toast("View saved: "+nm);
+    render(false);
+  } else if(v==="__del"){
+    if(!window.__curView) return;
+    if(!await hubConfirm("🗑 Delete view \""+esc(window.__curView)+"\"?","Only the saved shortcut disappears, no data is affected.","Delete")) return;
+    delete P.views[window.__curView]; window.__curView=null;
+    if(await savePrefs()) toast("View deleted");
+    render(false);
+  } else if(v.startsWith("v:")){
+    const nm=v.slice(2), s=P.views[nm]; if(!s) return;
+    if(s.view){ VIEW=Object.assign({},VIEW,s.view); saveView(); }
+    window.__SUP=Object.assign({lang:"all",days:"all",mine:false,un:false}, s.support||{});
+    FILTER=s.filter||"all"; window.__PF=s.pf||"all"; window.SORT=s.sort||"recent";
+    window.__curView=nm;
+    if(s.tab && PANELS[s.tab]){ CURRENT=s.tab; window.__lastTab=s.tab; }
+    render(); window.scrollTo(0,0); toast("View: "+nm);
+  }
+};
+
+/* ---------- active filter counter + one-click reset ---------- */
+function activeFilterCount(){
+  let n=0;
+  try{
+    const counts={}; LEADS.filter(l=>!l.internal).forEach(l=>counts[l.cc]=1);
+    const all=Object.keys(counts).length, set=activeCountries();
+    if(Object.keys(counts).filter(c=>set.has(c)).length < all) n++;
+  }catch(e){}
+  if(VIEW.callable) n++;
+  if(VIEW.range && VIEW.range!=="all") n++;
+  if(FILTER!=="all") n++;
+  const S=window.__SUP||{};
+  if(S.lang && S.lang!=="all") n++;
+  if(S.days && S.days!=="all") n++;
+  if(S.mine) n++; if(S.un) n++;
+  if(window.__PF && window.__PF!=="all") n++;
+  return n;
+}
+window.resetFilters = () => {
+  VIEW = {preset:"my", extra:null, callable:false, range:"all", showCC:VIEW.showCC}; saveView();
+  FILTER="all"; window.__SUP={lang:"all",days:"all",mine:false,un:false}; window.__PF="all"; window.SORT="recent";
+  window.__curView=null;
+  toast("All filters reset"); render(false);
+};
+window.qClear = () => {
+  const el=document.getElementById("q"); if(el){ el.value=""; el.focus(); }
+  qClose(); render(false);
+};
+
+/* ---------- theme: auto follows the system; light/dark force it ---------- */
+function applyTheme(){
+  const t=localStorage.getItem("hub_theme")||"auto";
+  if(t==="auto") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme=t;
+}
+window.cycleTheme = () => {
+  const cur=localStorage.getItem("hub_theme")||"auto";
+  const next=cur==="auto"?"light":cur==="light"?"dark":"auto";
+  localStorage.setItem("hub_theme",next); applyTheme();
+  toast("Theme: "+next+(next==="auto"?" (follows your system)":""));
+  render(false);
+};
+applyTheme();
+
+/* ---------- what is filtering my view right now? ---------- */
+function activeFilterList(){
+  const out=[];
+  try{
+    const counts={}; LEADS.filter(l=>!l.internal).forEach(l=>counts[l.cc]=1);
+    const all=Object.keys(counts).length, set=activeCountries();
+    const shown=Object.keys(counts).filter(c=>set.has(c)).length;
+    if(shown<all) out.push("🌍 Countries: "+shown+" of "+all+" shown");
+  }catch(e){}
+  if(VIEW.callable) out.push("☎ Callable now only ("+CAD().callFrom+":00 to "+CAD().callTo+":00 their local time)");
+  if(VIEW.range && VIEW.range!=="all") out.push("📅 Date range: "+(typeof VIEW.range==="number" ? "last "+VIEW.range+" days" : (VIEW.range.f||"…")+" to "+(VIEW.range.t||"…")));
+  if(FILTER!=="all") out.push("📋 List filter: "+FILTER);
+  const S=window.__SUP||{};
+  if(S.lang && S.lang!=="all") out.push("🎫 Support language: "+String(S.lang).toUpperCase()+" only");
+  if(S.days && S.days!=="all") out.push("🎫 Tickets opened within "+S.days+" days");
+  if(S.mine) out.push("🎫 Support: only assigned to me");
+  if(S.un) out.push("🎫 Support: only unassigned");
+  if(window.__PF && window.__PF!=="all") out.push("👥 People: "+window.__PF+" only");
+  return out;
+}
+window.showFilters = async () => {
+  const list=activeFilterList();
+  if(!list.length){ toast("No filters active, you see everything"); return; }
+  const v=await hubDialog({title:"Filters narrowing your view", body:list.map(esc).join("<br>"),
+    okLabel:"✕ Reset all", cancelLabel:"Keep them", danger:true});
+  if(v===true) resetFilters();
+};
+
+/* ---------- mass selection: filter first, then select all matching ---------- */
+window.__SEL = {on:false, ids:new Set()};
+window.selMode = () => { const S=window.__SEL; S.on=!S.on; if(!S.on) S.ids.clear(); render(false); };
+window.selToggle = id => { const S=window.__SEL; S.ids.has(id)?S.ids.delete(id):S.ids.add(id); render(false); };
+window.selAllMatching = () => { (window.__selMatch||[]).forEach(i=>window.__SEL.ids.add(i)); render(false); };
+window.selClear = () => { window.__SEL.ids.clear(); render(false); };
+window.selAssign = async v => {
+  if(!v) return;
+  const em = v==="__me" ? ME : (v==="__unassign" ? null : v);
+  const ids=[...window.__SEL.ids];
+  if(!ids.length){ toast("Nothing selected yet: tick some leads first"); return; }
+  if(!await hubConfirm("👤 "+(em?"Assign "+ids.length+" leads to "+esc(String(em).split("@")[0]):"Unassign "+ids.length+" leads")+"?",
+    "The owner changes on every selected lead in one go.", em?"Assign all":"Unassign all")) return;
+  for(let i=0;i<ids.length;i+=100){
+    const {error}=await sb.from("people").update({assigned_to:em}).in("id",ids.slice(i,i+100));
+    if(error){ hubAlert("Failed", esc(error.message)); return; }
+  }
+  ids.forEach(id=>{ const l=byId[id]; if(l) l.assigned=em; });
+  window.__SEL.ids.clear(); window.__SEL.on=false;
+  toast(ids.length+" leads "+(em?"assigned to "+String(em).split("@")[0]:"unassigned"));
+  render(false);
+};
+function selBar(matchIds){
+  window.__selMatch = matchIds;
+  if(!window.__SEL.on) return "";
+  return `<div class="filters" style="border:1px dashed var(--accent);border-radius:8px;padding:6px 8px">
+    <button class="fbtn" onclick="selAllMatching()">☑ Select all matching (${matchIds.length})</button>
+    <button class="fbtn" onclick="selClear()">✗ Clear (${window.__SEL.ids.size})</button>
+    <select class="st" onchange="selAssign(this.value);this.selectedIndex=0">
+      <option value="">👤 Assign ${window.__SEL.ids.size} selected to…</option>
+      <option value="__me">→ me</option>
+      ${(window.__users||[]).filter(u=>u.email!==ME).map(u=>`<option value="${esc(u.email)}">${esc(u.name||u.email.split("@")[0])}</option>`).join("")}
+      <option value="__unassign">✗ unassign</option>
+    </select>
+  </div>`;
+}
+const selBtn = () => window.CANW!==false ? `<button class="fbtn ${window.__SEL.on?'active':''}" onclick="selMode()" title="Tick leads and assign them in bulk">☑ Select</button>` : "";
+/* health of one data source: newest run wins, and a source that has not succeeded
+   in a while is "stale" even when nothing crashed (a job that never starts is
+   invisible otherwise) */
+const STALE_HOURS = 4, DEAD_HOURS = 8;
+function srcHealth(key){
+  const runs=(window.__syncRuns||[]).filter(r=>r.source===key);
+  const last=runs[0]||null;
+  const ok=runs.find(r=>r.ok)||null;
+  if(!last) return {state:"stale", last:null, msg:"No sync has ever run for this source."};
+  const ageH=(Date.now()-new Date(ok?ok.ran_at:last.ran_at))/3600000;
+  if(!last.ok) return {state:"bad", last, msg:(last.detail||"Failed")+(ok?" · last success "+new Date(ok.ran_at).toLocaleString(undefined,{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"")};
+  if(ageH>DEAD_HOURS) return {state:"bad", last, msg:"No successful run for "+Math.round(ageH)+" hours. Something is wrong: check the sync, not just the schedule."};
+  if(ageH>STALE_HOURS) return {state:"stale", last, msg:"Last fresh data "+Math.round(ageH)+" hours ago. Quiet periods are normal; press Sync now if you need it current."};
+  return {state:"ok", last, msg:""};
+}
+function healthProblems(){
+  return [["Salesforce","salesforce"],["Coupons","admin_panel"],["Email","email"],["Stripe","stripe"],["Placetel","placetel"]]
+    .map(([n,k])=>({n, ...srcHealth(k)})).filter(x=>x.state!=="ok");
+}
+
+/* the MCP snippets follow whatever folder the person types, so teammates on Macs
+   or other drives get a config that actually works on their machine */
+window.mcpPath = () => {
+  const el=document.getElementById("mcp-path"); if(!el) return;
+  const raw=(el.value||"").trim().replace(/[\\/]+$/,"") || "D:\\OrderCubeHub";
+  localStorage.setItem("hub_mcp_path", raw);
+  const win = /^[a-zA-Z]:\\/.test(raw) || raw.includes("\\");
+  const file = win ? raw+"\\mcp\\hub-mcp.js" : raw+"/mcp/hub-mcp.js";
+  const json = '{\n  "mcpServers": {\n    "ordercube-hub": {\n      "command": "node",\n      "args": ["'+(win?file.replace(/\\/g,"\\\\"):file)+'"]\n    }\n  }\n}';
+  const j=document.getElementById("mcp-json"); if(j) j.textContent=json;
+  const c=document.getElementById("mcp-cli"); if(c) c.textContent="claude mcp add ordercube-hub -- node "+file;
+  const o=document.getElementById("mcp-os"); if(o) o.textContent = win ? "Windows path" : "Mac or Linux path";
+};
+window.saveCadence = async () => {
+  const num=(id,min,max,dflt)=>{ const v=parseInt((document.getElementById(id)||{}).value,10); return isNaN(v)?dflt:Math.min(max,Math.max(min,v)); };
+  const cad={ resurface:num("cad-res",1,30,3), quiet:num("cad-quiet",2,90,14), callFrom:num("cad-from",0,23,9), callTo:num("cad-to",1,24,20), giveup:num("cad-giveup",2,20,5) };
+  if(cad.quiet<=cad.resurface) cad.quiet=cad.resurface+1;
+  if(cad.callTo<=cad.callFrom) cad.callTo=Math.min(24,cad.callFrom+1);
+  window.__PREFS=Object.assign({},window.__PREFS,{cadence:cad});
+  if(await savePrefs()) toast("Cadence saved: resurface "+cad.resurface+"d, quiet "+cad.quiet+"d, callable "+cad.callFrom+"-"+cad.callTo);
+  render(false);
+};
+window.changePw = async () => {
+  const v = (document.getElementById("npw").value||"").trim();
+  if(v.length < 8){ toast("Password needs at least 8 characters"); return; }
+  const {error} = await sb.auth.updateUser({password: v});
+  toast(error ? "Failed: "+error.message : "Password changed ✓");
+  if(!error) document.getElementById("npw").value="";
+};
+async function boot(){
+  const {data:{session}} = await sb.auth.getSession();
+  if(!session){ document.getElementById("login").style.display="flex"; return; }
+  ME = session.user.email;
+  try {
+    const {data:prof} = await sb.from("app_users").select("*").eq("email", ME).maybeSingle();
+    window.PROFILE = prof || {role:"viewer", can_write:false, tabs:["today","fresh","followups","funnel","people"]};
+  } catch(e){ window.PROFILE = {role:"viewer", can_write:false, tabs:["today","fresh","followups","funnel","people"]}; }
+  window.CANW = PROFILE.role==="admin" || !!PROFILE.can_write;
+  try {   // personal defaults: start tab, support filters, view (view only if this browser has none yet)
+    const {data:up} = await sb.from("user_prefs").select("prefs").eq("email", ME).maybeSingle();
+    const P = window.__PREFS = (up && up.prefs) || {};
+    if(P.support) window.__SUP = Object.assign({lang:"all",days:"all",mine:false,un:false}, P.support);
+    if(P.view && !localStorage.getItem("hub_view_v1")) Object.assign(VIEW, P.view);
+    if(P.tab && PANELS[P.tab] && (PROFILE.role==="admin" || (PROFILE.tabs||[]).includes(P.tab))){ CURRENT = P.tab; window.__lastTab = P.tab; }
+  } catch(e){}
+  document.getElementById("login").style.display="none";
+  document.getElementById("loading").style.display="flex";
+  await loadData();
+  await migrateLocal();
+  document.getElementById("loading").style.display="none";
+  document.getElementById("app").style.display="flex";
+  render();
+  startAutoReload();
+}
+/* the page keeps itself current: a quiet reload every few minutes, skipped while
+   a dialog is open or something is being typed, so nothing is ever yanked away */
+function startAutoReload(){
+  if(window.__autoTimer) return;
+  window.__autoTimer = setInterval(async ()=>{
+    if(document.hidden) return;
+    if(document.getElementById("mergeov") || document.getElementById("hubdlg")) return;
+    const a=document.activeElement;
+    if(a && ["INPUT","TEXTAREA","SELECT"].includes(a.tagName)) return;
+    try{ await loadData(); render(false); }catch(e){ console.error("auto reload failed:", e); }
+  }, 240000);
+}
+boot();
+</script>
+</body>
+</html>
