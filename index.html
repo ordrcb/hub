@@ -386,7 +386,7 @@ async function fetchAll(table, sel, orderCol){
   }
 }
 async function loadData(){
-  const [{data:people, error:e1},{data:touchRows, error:e2},{data:statRows, error:e3},{data:couponRows, error:e4},{data:runRows},{data:ticketRows},{data:clientRows},{data:tmsgRows},{data:userRows},{data:umailRows},{data:ucallRows},{data:creqRows}] = await Promise.all([
+  const [{data:people, error:e1},{data:touchRows, error:e2},{data:statRows, error:e3},{data:couponRows, error:e4},{data:runRows},{data:ticketRows},{data:clientRows},{data:tmsgRows},{data:userRows},{data:umailRows},{data:ucallRows},{data:creqRows},{data:mbRows}] = await Promise.all([
     fetchAll("people","*","created_at"),
     fetchAll("touches","id,person_id,kind,at,detail,by_user,snippet","id"),
     sb.from("stats").select("key,value"),
@@ -398,7 +398,8 @@ async function loadData(){
     sb.from("app_users").select("*").order("email"),
     sb.from("unmatched_inbox").select("*").order("last_at",{ascending:false}).limit(500),
     sb.from("unmatched_calls").select("*").order("cnt",{ascending:false}).limit(500),
-    sb.from("coupon_requests").select("*").order("id",{ascending:false}).limit(50)
+    sb.from("coupon_requests").select("*").order("id",{ascending:false}).limit(50),
+    sb.from("mailboxes").select("email,owner_email,host,port,active,ok,error,last_sync").order("email")
   ]);
   if(e1||e2||e3||e4){ hubAlert("Load error", esc((e1||e2||e3||e4).message)); return; }
   window.__couponRows = couponRows||[];
@@ -409,6 +410,7 @@ async function loadData(){
   window.__trayMail = umailRows||[];
   window.__trayCalls = ucallRows||[];
   window.__couponReqs = creqRows||[];
+  window.__mailboxes = mbRows||[];
   window.__tmsgs = {};
   (tmsgRows||[]).forEach(m=>{ (window.__tmsgs[m.ticket_id]=window.__tmsgs[m.ticket_id]||[]).push(m); });
   STATS = Object.fromEntries((statRows||[]).map(r=>[r.key,r.value]));
@@ -1241,7 +1243,24 @@ const PANELS = {
       <p class="hint">Live status of every source feeding this hub, updated on each sync run.</p>
       ${CONN.map(row).join("")}
       <h2>Mailboxes</h2>
-      <p class="hint">One card per connected mailbox, health refreshed on every sync run. A red card means the stored password is wrong or expired: an admin fixes the secret on the server, nothing to type here. New teammates' mailboxes are added the same way, takes two minutes.</p>
+      <p class="hint">Every mail you send or receive with a lead or a customer belongs in the hub, so each person connects their own mailbox here. Your password is scrambled inside your browser before it is sent: the hub stores only unreadable characters, and nobody, not an admin and not Claude, can read it back. Only the sync job can open it.</p>
+      ${(()=>{
+        const mine=(window.__mailboxes||[]).find(m=>m.owner_email===ME);
+        const key=STATS.mailboxKey;
+        if(!key) return `<div class="card"><div class="row" style="cursor:default"><div class="who"><span class="nm">Connecting mailboxes is not switched on yet</span><div class="co">The server needs its mailbox key before anyone can connect. Ask Claude to finish the setup.</div></div></div></div>`;
+        if(mine) return `<div class="card"><div class="row" style="cursor:default">
+          <div class="who"><span class="nm">📬 ${esc(mine.email)}</span>
+            <div class="co">${mine.ok===false?esc(mine.error||"not working"):mine.ok?"Your mail is being sorted into tickets, leads and touches":"Connected, waiting for the first sync run"}</div></div>
+          <span class="chip" style="color:${mine.ok===false?"var(--crit)":mine.ok?"var(--goodtext)":"var(--ink2)"}">${mine.ok===false?"✗ not working":mine.ok?"✓ connected":"… pending"}${mine.last_sync?" · "+new Date(mine.last_sync).toLocaleString(undefined,{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):""}</span>
+          <button class="btn" onclick="mbConnect()">Change password</button>
+          <button class="btn" onclick="mbDisconnect('${esc(mine.email)}')">Disconnect</button>
+        </div></div>`;
+        return `<div class="card"><div class="row" style="cursor:default">
+          <div class="who"><span class="nm">Your mailbox is not connected</span>
+            <div class="co">Connect it and your own conversations with leads and customers appear in the hub automatically, including the replies you send.</div></div>
+          <button class="btn primary" onclick="mbConnect()">📬 Connect my mailbox</button>
+        </div></div>`;
+      })()}
       ${(()=>{
         const acc=STATS.emailAccounts||null;
         const legacy=[...new Set(Object.keys(STATS.emailState||{}).map(k=>k.split(":")[0]).filter(a=>a.includes("@")))];
@@ -1524,11 +1543,12 @@ function render(){
       `<div class="navfoot">
         ${(()=>{try{
           const bad=healthProblems();
-          const acc=STATS.emailAccounts, mine=acc?acc[ME]:null;
+          const mb=(window.__mailboxes||[]).find(m=>m.owner_email===ME);
+          const acc=STATS.emailAccounts, shared=acc?acc[ME]:null;   // ME may be a shared mailbox too
           const lines=[];
           if(bad.length) lines.push(`<a onclick="go('settings')" style="color:${bad.some(b=>b.state==="bad")?"var(--crit)":"var(--serious)"}" title="${esc(bad.map(b=>b.n+": "+b.msg).join(" · "))}">⚠ ${bad.length===1?bad[0].n+" sync "+(bad[0].state==="bad"?"failing":"stale"):bad.length+" syncs need attention"}</a>`);
-          if(acc && !mine) lines.push(`<a onclick="go('settings')" style="color:var(--serious)" title="Open Settings → Mailboxes">⚠ your mailbox is not connected</a>`);
-          else if(mine && !mine.ok) lines.push(`<a onclick="go('settings')" style="color:var(--crit)" title="${esc(mine.error||"")}">⚠ your mailbox login is broken</a>`);
+          if(mb && mb.ok===false) lines.push(`<a onclick="go('settings')" style="color:var(--crit)" title="${esc(mb.error||"")}">⚠ your mailbox needs reconnecting</a>`);
+          else if(!mb && !shared && STATS.mailboxKey) lines.push(`<a onclick="go('settings')" style="color:var(--serious)" title="Your own mails with leads and customers are missing from the hub until you connect">⚠ connect your mailbox</a>`);
           return lines.length?lines.join("<br>")+"<br>":"";
         }catch(e){return "";}})()}
         <a onclick="cycleTheme()" title="Switch between auto (follows your system), light and dark">◐ Theme: ${localStorage.getItem("hub_theme")||"auto"}</a><br>
@@ -2079,6 +2099,66 @@ window.mcpPath = () => {
   const j=document.getElementById("mcp-json"); if(j) j.textContent=json;
   const c=document.getElementById("mcp-cli"); if(c) c.textContent="claude mcp add ordercube-hub -- node "+file;
   const o=document.getElementById("mcp-os"); if(o) o.textContent = win ? "Windows path" : "Mac or Linux path";
+};
+/* connecting a mailbox: the password is encrypted here, in the browser, with the
+   public key from the database. What travels and what is stored is ciphertext;
+   only the sync job holds the private key that can open it. */
+async function encryptForServer(text){
+  const b64 = STATS.mailboxKey;
+  if(!b64) throw new Error("this hub has no mailbox key yet");
+  const der = Uint8Array.from(atob(b64), c=>c.charCodeAt(0));
+  const key = await crypto.subtle.importKey("spki", der.buffer,
+    {name:"RSA-OAEP", hash:"SHA-256"}, false, ["encrypt"]);
+  const buf = await crypto.subtle.encrypt({name:"RSA-OAEP"}, key, new TextEncoder().encode(text));
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+window.mbConnect = () => {
+  const mine=(window.__mailboxes||[]).find(m=>m.owner_email===ME);
+  let ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  ov=document.createElement("div"); ov.id="mergeov";
+  ov.innerHTML=`<div class="mcard"><h3>📬 Connect my mailbox</h3>
+    <div class="meta">Your mail password is scrambled in this browser before it is sent. The hub keeps only the scrambled version, which nobody can read; the sync job opens it to fetch your mail and nothing else.</div>
+    <input class="li" id="mb-email" placeholder="Mailbox address" value="${esc((mine&&mine.email)||ME||"")}">
+    <input class="li" id="mb-pass" type="password" placeholder="Mail password (not your hub password)" autocomplete="new-password">
+    <div class="acts">
+      <label class="chip">server <input class="li" id="mb-host" value="${esc((mine&&mine.host)||ORG().imapHost||"imap.strato.de")}" style="width:170px;padding:2px 6px"></label>
+      <label class="chip">port <input class="li" id="mb-port" type="number" value="${(mine&&mine.port)||993}" style="width:70px;padding:2px 6px"></label>
+    </div>
+    <div class="meta">The hub never marks your mail as read and never deletes anything: it only looks at who wrote to whom, the subject and a short preview.</div>
+    <div class="acts" style="justify-content:flex-end">
+      <button class="btn" onclick="document.getElementById('mergeov').remove()">Cancel</button>
+      <button class="btn primary" onclick="mbSave()">Connect</button>
+    </div></div>`;
+  ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
+  document.body.appendChild(ov);
+  ov.querySelector("#mb-pass").focus();
+};
+window.mbSave = async () => {
+  const g=id=>((document.getElementById(id)||{}).value||"").trim();
+  const email=g("mb-email").toLowerCase(), pass=(document.getElementById("mb-pass")||{}).value||"";
+  if(!/^\S+@\S+\.\S+$/.test(email)){ toast("Enter your mailbox address"); return; }
+  if(!pass){ toast("Enter the mail password"); return; }
+  let enc;
+  try{ enc = await encryptForServer(pass); }
+  catch(e){ hubAlert("Could not secure the password", esc(e.message)); return; }
+  const row={ email, owner_email:ME, host:g("mb-host")||"imap.strato.de", port:parseInt(g("mb-port"),10)||993,
+    pass_enc:enc, active:true, ok:null, error:null, updated_at:new Date().toISOString() };
+  const {error}=await sb.from("mailboxes").upsert(row);
+  if(error){ hubAlert("Could not save", esc(error.message)+(/duplicate|policy/i.test(error.message)?"<br><br>That address may already be connected by someone else.":"")); return; }
+  const ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  window.__mailboxes=[...(window.__mailboxes||[]).filter(m=>m.owner_email!==ME), row];
+  render(false);
+  const v=await hubDialog({title:"📬 Mailbox connected",
+    body:"Your mail joins the hub on the next sync run. Start one now and it takes about two minutes.",
+    okLabel:"⚡ Sync now", cancelLabel:"Wait for the next run"});
+  if(v===true) syncNow();
+};
+window.mbDisconnect = async email => {
+  if(!await hubConfirm("Disconnect "+esc(email)+"?","New mail stops being collected. Everything already in the hub stays.","Disconnect")) return;
+  const {error}=await sb.from("mailboxes").delete().eq("email",email);
+  if(error){ hubAlert("Could not disconnect", esc(error.message)); return; }
+  window.__mailboxes=(window.__mailboxes||[]).filter(m=>m.email!==email);
+  toast("Disconnected"); render(false);
 };
 window.saveCadence = async () => {
   const num=(id,min,max,dflt)=>{ const v=parseInt((document.getElementById(id)||{}).value,10); return isNaN(v)?dflt:Math.min(max,Math.max(min,v)); };
