@@ -385,32 +385,101 @@ async function fetchAll(table, sel, orderCol){
     from+=CH;
   }
 }
-async function loadData(){
-  const [{data:people, error:e1},{data:touchRows, error:e2},{data:statRows, error:e3},{data:couponRows, error:e4},{data:runRows},{data:ticketRows},{data:clientRows},{data:tmsgRows},{data:userRows},{data:umailRows},{data:ucallRows},{data:creqRows},{data:mbRows}] = await Promise.all([
-    fetchAll("people","*","created_at"),
-    fetchAll("touches","id,person_id,kind,at,detail,by_user,snippet","id"),
+/* Big tables are downloaded once per session and then only what changed is
+   fetched. A background refresh costs a few kilobytes instead of the whole
+   dataset, which keeps a whole team inside the free bandwidth allowance.
+   Merging is additive: rows are updated in place, never dropped, so nothing can
+   vanish from a timeline. Deletions and merges are caught by the row counts. */
+const RAW = { people:[], touches:[], coupons:[], tmsgs:[], mark:{} };
+const upsertRows = (arr, rows, key) => {
+  if(!rows || !rows.length) return arr;
+  const ix = new Map(arr.map((r,i)=>[r[key],i]));
+  rows.forEach(r=>{ const i=ix.get(r[key]); if(i===undefined){ ix.set(r[key],arr.length); arr.push(r); } else arr[i]=r; });
+  return arr;
+};
+const maxOf = (rows, col) => rows.reduce((m,r)=> (r[col]>m ? r[col] : m), "");
+const rowCount = async t => { try{ const {count}=await sb.from(t).select("*",{count:"exact",head:true}); return count; }catch(e){ return null; } };
+
+async function loadData(delta){
+  const canDelta = delta && RAW.people.length && RAW.mark.people;
+  // small tables are cheap enough to take whole every time
+  const small = await Promise.all([
     sb.from("stats").select("key,value"),
-    fetchAll("coupons","code,person_id,issued_at,expires_at,redeemed,raw","id"),
-    sb.from("sync_runs").select("source,ran_at,ok,detail").order("ran_at",{ascending:false}).limit(500),
-    sb.from("tickets").select("*").order("last_activity_at",{ascending:false}).limit(400),
-    sb.from("clients").select("*").order("total_paid",{ascending:false}).limit(500),
-    fetchAll("ticket_messages","*","at"),
+    sb.from("sync_runs").select("source,ran_at,ok,detail").order("ran_at",{ascending:false}).limit(40),
+    canDelta ? sb.from("tickets").select("*").gt("updated_at", RAW.mark.tickets||"").limit(400)
+             : sb.from("tickets").select("*").order("last_activity_at",{ascending:false}).limit(400),
     sb.from("app_users").select("*").order("email"),
     sb.from("unmatched_inbox").select("*").order("last_at",{ascending:false}).limit(500),
     sb.from("unmatched_calls").select("*").order("cnt",{ascending:false}).limit(500),
     sb.from("coupon_requests").select("*").order("id",{ascending:false}).limit(50),
-    sb.from("mailboxes").select("email,owner_email,host,port,active,ok,error,last_sync").order("email")
+    sb.from("mailboxes").select("email,owner_email,host,port,active,ok,error,last_sync").order("email"),
   ]);
+  const [{data:statRows, error:e3},{data:runRows},{data:ticketRows},{data:userRows},
+         {data:umailRows},{data:ucallRows},{data:creqRows},{data:mbRows}] = small;
+
+  let e1=null, e2=null, e4=null;
+  if(!canDelta){
+    const [p, t, cp, tm] = await Promise.all([
+      fetchAll("people","*","created_at"),
+      fetchAll("touches","id,person_id,kind,at,detail,by_user,snippet","id"),
+      fetchAll("coupons","code,person_id,issued_at,expires_at,redeemed,raw,updated_at","id"),
+      fetchAll("ticket_messages","*","id"),
+    ]);
+    e1=p.error; e2=t.error; e4=cp.error;
+    RAW.people=p.data||[]; RAW.touches=t.data||[]; RAW.coupons=cp.data||[]; RAW.tmsgs=tm.data||[];
+  } else {
+    const m = RAW.mark;
+    const [p, t, cp, tm] = await Promise.all([
+      sb.from("people").select("*").gt("updated_at", m.people).limit(1000),
+      sb.from("touches").select("id,person_id,kind,at,detail,by_user,snippet").gt("id", m.touchId).order("id").limit(1000),
+      sb.from("coupons").select("code,person_id,issued_at,expires_at,redeemed,raw,updated_at").gt("updated_at", m.coupons||"").limit(1000),
+      sb.from("ticket_messages").select("*").gt("id", m.tmsgId).order("id").limit(1000),
+    ]);
+    e1=p.error; e2=t.error; e4=cp.error;
+    upsertRows(RAW.people, p.data, "id");
+    upsertRows(RAW.touches, t.data, "id");
+    upsertRows(RAW.coupons, cp.data, "code");
+    upsertRows(RAW.tmsgs, tm.data, "id");
+    // rows that disappeared (deletes, merges) never show up in a delta: compare
+    // counts and fall back to a full load for that table when they drift
+    const [cP, cT] = await Promise.all([rowCount("people"), rowCount("touches")]);
+    if(cP!==null && cP!==RAW.people.length){ const r=await fetchAll("people","*","created_at"); if(!r.error) RAW.people=r.data; }
+    if(cT!==null && cT!==RAW.touches.length){ const r=await fetchAll("touches","id,person_id,kind,at,detail,by_user,snippet","id"); if(!r.error) RAW.touches=r.data; }
+  }
   if(e1||e2||e3||e4){ hubAlert("Load error", esc((e1||e2||e3||e4).message)); return; }
+  RAW.mark.people  = maxOf(RAW.people,"updated_at") || new Date().toISOString();
+  RAW.mark.coupons = maxOf(RAW.coupons,"updated_at") || RAW.mark.coupons || "";
+  RAW.mark.touchId = RAW.touches.reduce((m,r)=>Math.max(m, r.id||0), 0);
+  RAW.mark.tmsgId  = RAW.tmsgs.reduce((m,r)=>Math.max(m, r.id||0), 0);
+
+  const people = RAW.people, touchRows = RAW.touches, couponRows = RAW.coupons, tmsgRows = RAW.tmsgs;
   window.__couponRows = couponRows||[];
   window.__syncRuns = runRows||[];
-  window.__tickets = ticketRows||[];
-  window.__clients = clientRows||[];
+  // tickets: full list on the first load, then only the ones that changed
+  if(canDelta){
+    upsertRows(window.__tickets=window.__tickets||[], ticketRows, "id");
+    const cTk = await rowCount("tickets");
+    if(cTk!==null && cTk!==window.__tickets.length){
+      const {data:all} = await sb.from("tickets").select("*").order("last_activity_at",{ascending:false}).limit(400);
+      window.__tickets = all||window.__tickets;
+    }
+  } else window.__tickets = ticketRows||[];
+  RAW.mark.tickets = maxOf(window.__tickets,"updated_at") || RAW.mark.tickets || "";
   window.__users = userRows||[];
   window.__trayMail = umailRows||[];
   window.__trayCalls = ucallRows||[];
   window.__couponReqs = creqRows||[];
   window.__mailboxes = mbRows||[];
+  // clients only change when Stripe reports different numbers, so compare what
+  // the sync said rather than when it ran (it runs every half hour regardless)
+  const stripeRun = (runRows||[]).find(r=>r.source==="stripe" && r.ok);
+  const stripeMark = stripeRun ? stripeRun.detail : "none";
+  if(!window.__clients || RAW.mark.stripe!==stripeMark){
+    const {data:cl} = await sb.from("clients").select("*").order("total_paid",{ascending:false}).limit(500);
+    window.__clients = cl||[];
+    RAW.mark.stripe = stripeMark;
+  }
+  const clientRows = window.__clients||[];
   window.__tmsgs = {};
   (tmsgRows||[]).forEach(m=>{ (window.__tmsgs[m.ticket_id]=window.__tmsgs[m.ticket_id]||[]).push(m); });
   STATS = Object.fromEntries((statRows||[]).map(r=>[r.key,r.value]));
@@ -1899,7 +1968,7 @@ window.syncNow = async () => {
   if(!data || data.ok===false){ toast((data&&data.message)||"Sync not started"); return; }
   toast(data.message||"Sync started");
   // the run takes a couple of minutes; pull the results in automatically
-  setTimeout(async ()=>{ await loadData(); render(); toast("Fresh data loaded ✓"); }, 150000);
+  setTimeout(async ()=>{ await loadData(true); render(); toast("Fresh data loaded ✓"); }, 150000);
 };
 window.setTicketState = async (id, v) => {
   const t=(window.__tickets||[]).find(x=>x.id===id);
@@ -2210,8 +2279,8 @@ function startAutoReload(){
     if(document.getElementById("mergeov") || document.getElementById("hubdlg")) return;
     const a=document.activeElement;
     if(a && ["INPUT","TEXTAREA","SELECT"].includes(a.tagName)) return;
-    try{ await loadData(); render(false); }catch(e){ console.error("auto reload failed:", e); }
-  }, 240000);
+    try{ await loadData(true); render(false); }catch(e){ console.error("auto reload failed:", e); }
+  }, 600000);
 }
 boot();
 </script>
