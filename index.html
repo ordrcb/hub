@@ -413,9 +413,10 @@ async function loadData(delta){
     sb.from("unmatched_calls").select("*").order("cnt",{ascending:false}).limit(500),
     sb.from("coupon_requests").select("*").order("id",{ascending:false}).limit(50),
     sb.from("mailboxes").select("email,owner_email,host,port,active,ok,error,last_sync").order("email"),
+    sb.from("audit").select("*").order("at",{ascending:false}).limit(400),
   ]);
   const [{data:statRows, error:e3},{data:runRows},{data:ticketRows},{data:userRows},
-         {data:umailRows},{data:ucallRows},{data:creqRows},{data:mbRows}] = small;
+         {data:umailRows},{data:ucallRows},{data:creqRows},{data:mbRows},{data:auditRows}] = small;
 
   let e1=null, e2=null, e4=null;
   if(!canDelta){
@@ -470,6 +471,9 @@ async function loadData(delta){
   window.__trayCalls = ucallRows||[];
   window.__couponReqs = creqRows||[];
   window.__mailboxes = mbRows||[];
+  window.__audit = auditRows||[];
+  window.__auditBy = {};
+  (auditRows||[]).forEach(a=>{ if(a.person_id) (window.__auditBy[a.person_id]=window.__auditBy[a.person_id]||[]).push(a); });
   // clients only change when Stripe reports different numbers, so compare what
   // the sync said rather than when it ran (it runs every half hour regardless)
   const stripeRun = (runRows||[]).find(r=>r.source==="stripe" && r.ok);
@@ -636,7 +640,8 @@ function leadRow(l, extra){
         <div class="notelog">${timeline(l).map(e=>
           `<div class="noteitem"><span class="meta">${esc(e.d)}</span> ${e.i} ${
             e.snip?`<details class="snip"><summary title="Click to read the email">${esc(e.t)} ▾</summary><div class="body">${esc(e.snip)}</div></details>`:esc(e.t)
-          }${e.del&&window.CANW!==false?`<button class="tdel" title="Delete this manually logged entry" onclick="delTouch(${e.del},'${l.id}')">🗑</button>`:""}</div>`).join("")||'<div class="meta">No activity recorded yet</div>'}</div>
+          }${e.del&&window.CANW!==false?`<button class="tdel" title="Delete this manually logged entry" onclick="delTouch(${e.del},'${l.id}')">🗑</button>`:""
+          }${e.undoId&&window.CANW!==false?`<button class="tdel" title="Undo this merge: make them two separate people again" onclick="undoMerge(${e.undoId})">↩</button>`:""}</div>`).join("")||'<div class="meta">No activity recorded yet</div>'}</div>
         ${window.CANW!==false?`<div style="display:flex;gap:6px;margin-top:4px">
           <textarea class="note" id="nt-${l.id}" placeholder="Add a note…" rows="1"></textarea>
           <button class="btn" onclick="addNote('${l.id}')">Add</button>
@@ -704,6 +709,10 @@ function timeline(l){
       t:"Coupon "+cp.code+" ("+cp.val+")"+(cp.redeemed?" · redeemed 🎉":(cp.exp?(cp.active?" · expires "+cp.exp.toLocaleDateString():" · expired"):""))})),
     ...tks.map(t=>({d:String(t.opened_at).slice(0,10), i:"🎫",
       t:"Support: "+(t.subject||"")+" · "+String(t.state).replace(/_/g," ")})),
+    ...((window.__auditBy||{})[l.id]||[]).map(a=>({d:String(a.at).slice(0,10), i:"✏️",
+      t:(a.who?String(a.who).split("@")[0]+": ":"")+({status:"status",assign:"owner",merge:"merged",unmerge:"merge undone",reminder:"reminder"}[a.action]||a.action)
+        +(a.detail?" · "+a.detail:""),
+      undoId:(a.action==="merge"&&a.undo)?a.id:null})),
     ...(l.client?[{d:String(l.client.first_paid_at||"").slice(0,10), i:"🎉",
       t:"LEAD → CLIENT: first payment. "+l.client.payments+" payment"+(l.client.payments>1?"s":"")+" · "
         +eur(l.client.total_paid,l.client.currency)+" total so far. Below this line is the lead journey, above is life as a client."}]:[])
@@ -841,7 +850,24 @@ window.doMerge = async (keepId, dupId) => {
   const r1=await sb.from("people").update({email:null, merged_into:keepId}).eq("id",dup.id);
   const r2=await sb.from("people").update({email:primary||null, alt_email:altPick}).eq("id",keepId);
   if(r1.error||r2.error){ hubAlert("Merge partially failed", esc((r1.error||r2.error).message)); return; }
+  await logAudit("merge",{person_id:keepId,
+    detail:(dup.name||"?")+" ("+(dup.email||dup.phone||"no contact")+") merged into "+(keep.name||"?"),
+    undo:{dup_id:dup.id, dup_email:dup.email||null, keep_id:keepId,
+          keep_email:keep.email||null, keep_alt:keep.alt||null}});
   toast("Merged ✓ (both emails and phones kept)");
+  await loadData(); render();
+};
+/* merges used to be one-way; now the last one on a person can be taken back */
+window.undoMerge = async auditId => {
+  const a=(window.__audit||[]).find(x=>x.id===auditId); if(!a||!a.undo) return;
+  const u=a.undo;
+  if(!await hubConfirm("↩ Undo this merge?","The two records become separate people again. Notes, calls and emails stay where they are now, so anything added since the merge remains on the surviving person.","Undo merge")) return;
+  const r1=await sb.from("people").update({merged_into:null, email:u.dup_email||null}).eq("id",u.dup_id);
+  if(r1.error){ hubAlert("Could not undo", esc(r1.error.message)); return; }
+  const r2=await sb.from("people").update({email:u.keep_email||null, alt_email:u.keep_alt||null}).eq("id",u.keep_id);
+  if(r2.error){ hubAlert("Partly undone", esc(r2.error.message)); }
+  await logAudit("unmerge",{person_id:u.keep_id, detail:"merge reversed"});
+  toast("Merge undone");
   await loadData(); render();
 };
 function relTime(l){
@@ -851,10 +877,18 @@ function relTime(l){
 }
 window.toggle = id => { const c=document.querySelector(`.card[data-id="${id}"]`); if(c) c.classList.toggle("open"); };
 function flash(id){ const s=document.getElementById("sv-"+id); if(s){s.style.visibility="visible"; setTimeout(()=>s.style.visibility="hidden",1500);} }
+/* who did what: decisions made in the hub are recorded, so questions like
+   "who marked this Lost?" or "who merged these two?" have an answer later */
+async function logAudit(action, o){
+  try{ await sb.from("audit").insert({who:ME, action, person_id:o.person_id||null,
+    ticket_id:o.ticket_id||null, detail:o.detail||null, undo:o.undo||null}); }
+  catch(e){ console.error("audit failed:", e); }
+}
 window.setStatus = async (id,v)=>{
-  const l=byId[id]; l.hub=v||null; derive(l); flash(id); render(false);
+  const l=byId[id]; const was=l.hub; l.hub=v||null; derive(l); flash(id); render(false);
   const {error} = await sb.from("people").update({hub_status:v||null,updated_at:new Date().toISOString()}).eq("id",id);
-  if(error) hubAlert("Save failed", esc(error.message));
+  if(error){ hubAlert("Save failed", esc(error.message)); return; }
+  logAudit("status",{person_id:id, detail:(was||"Salesforce status")+" → "+(v||"Salesforce status")});
 };
 window.addNote = async id => {
   const box=document.getElementById("nt-"+id); const v=(box.value||"").trim(); if(!v) return;
@@ -916,7 +950,8 @@ window.assignLead = async (id,v) => {
   const card=document.querySelector(`.card[data-id="${id}"]`); if(card) card.classList.add("open");
   toast(l.assigned ? "Lead assigned to "+String(l.assigned).split("@")[0] : "Lead unassigned");
   const {error}=await sb.from("people").update({assigned_to:l.assigned}).eq("id",id);
-  if(error) hubAlert("Save failed", esc(error.message));
+  if(error){ hubAlert("Save failed", esc(error.message)); return; }
+  logAudit("assign",{person_id:id, detail:l.assigned? "assigned to "+l.assigned : "unassigned"});
 };
 window.delTouch = async (tid, pid) => {
   if(!await hubConfirm("🗑 Delete this entry?","Only manually logged notes, WA logs and hub-logged calls can be deleted. Imported history (Placetel, email, Calendly, Salesforce) always stays.","Delete")) return;
@@ -1081,7 +1116,21 @@ const PANELS = {
       <h2 id="sec-quiet">Gone quiet, ${CAD().quiet}+ days (${quiet.length})</h2>
       ${list(quiet, l=>({txt:l.quiet+"d silent",cls:"quiet"}))}
       <h2>Scheduled ahead (${plan.length})</h2>
-      ${list(plan, l=>({txt:"due "+l.planned.toLocaleDateString(undefined,{day:"numeric",month:"short"})}))}`;
+      ${list(plan, l=>({txt:"due "+l.planned.toLocaleDateString(undefined,{day:"numeric",month:"short"})}))}
+      <h2>The last seven days</h2>
+      ${(()=>{ const w=weekStats(); const names=Object.keys(w.per).sort();
+        return `<p class="hint">What was actually done since ${w.since.toLocaleDateString(undefined,{day:"numeric",month:"short"})}: real activity, not statuses. The funnel shows where leads stand; this shows what the team did.</p>
+        <div class="tiles">
+          <div class="tile"><div class="v">${w.newLeads}</div><div class="l">New people arrived</div></div>
+          <div class="tile"><div class="v">${Object.values(w.per).reduce((a,x)=>a+x.calls,0)}</div><div class="l">Calls</div><div class="s">${Object.values(w.per).reduce((a,x)=>a+x.connected,0)} actually connected</div></div>
+          <div class="tile"><div class="v">${Object.values(w.per).reduce((a,x)=>a+x.emails+x.wa,0)}</div><div class="l">Emails and WhatsApp</div></div>
+          <div class="tile"><div class="v">${w.tickets}</div><div class="l">Support tickets opened</div></div>
+          <div class="tile"><div class="v">${w.won}</div><div class="l">Became clients</div></div>
+        </div>
+        ${names.length?`<details class="tbl" open><summary>Per person</summary><table>
+          <tr><th>Person</th><th>Calls</th><th>Connected</th><th>WhatsApp</th><th>Emails</th><th>Meetings</th><th>Notes</th></tr>
+          ${names.map(n=>{const p=w.per[n];return `<tr><td>${esc(n)}</td><td>${p.calls}</td><td>${p.connected}</td><td>${p.wa}</td><td>${p.emails}</td><td>${p.meetings}</td><td>${p.notes}</td></tr>`;}).join("")}
+        </table></details>`:""}`; })()}`;
     }
   },
   fresh: {
@@ -1454,7 +1503,8 @@ const PANELS = {
     title:"People", count:()=>LEADS.length+((window.__extraPeople||[]).length),
     render(){
       const q=(document.getElementById("q").value||"").toLowerCase().trim();
-      let arr=LEADS.filter(l=>!q||matchLead(l,q));
+      // colleagues are not leads: they only show when explicitly searched for
+      let arr=LEADS.filter(l=>(!l.internal||q) && (!q||matchLead(l,q)));
       let extras=(window.__extraPeople||[]).filter(p=>!q||[p.name,p.email].some(v=>(v||"").toLowerCase().includes(q)));
       const F=window.__PF||"all";
       const counts={all:arr.length+extras.length,lead:0,client:0,support:0};
@@ -1512,6 +1562,21 @@ const PANELS = {
       ${aC.map(callRow).join("")||'<div class="empty">Tray is empty. Unmatched numbers appear after the next <b>import-calls.cmd</b> run.</div>'}
       <h2>✉️ Unknown email senders (${aM.length})</h2>
       ${aM.map(mailRow).join("")||'<div class="empty">No unknown senders 🎉</div>'}
+      ${(()=>{ const hid=dupHidden();
+        const dups=duplicateSuggestions().filter(d=>!hid.has([d.a.id,d.b.id].sort().join("|"))).slice(0,25);
+        if(!dups.length) return "";
+        return `<h2>👥 Possibly the same person (${dups.length})</h2>
+        <p class="hint">Found by matching phone numbers, email addresses and name plus company. Nothing is merged automatically: open one, check, then merge or mark them as different.</p>
+        ${dups.map(d=>`<div class="card"><div class="row" style="cursor:default">
+          <div class="who"><span class="nm">${esc(d.a.name||d.a.email||"?")}</span>
+            <div class="co">${esc(d.a.email||d.a.phone||"")} · ${d.a.touches} activities</div></div>
+          <span class="chip">${esc(d.why)}</span>
+          <div class="who"><span class="nm">${esc(d.b.name||d.b.email||"?")}</span>
+            <div class="co">${esc(d.b.email||d.b.phone||"")} · ${d.b.touches} activities</div></div>
+          <button class="btn" onclick="openPerson('${d.a.id}')">Open first</button>
+          ${window.CANW!==false?`<button class="btn primary" onclick="doMerge('${d.a.id}','${d.b.id}')" title="Keep the first, fold the second into it">⇄ Merge them</button>
+          <button class="btn" onclick="dupDismiss('${d.a.id}','${d.b.id}')">Different people</button>`:""}
+        </div></div>`).join("")}`; })()}
       <details class="tbl"><summary>Dismissed (${dC.length+dM.length}): kept here forever, restore any time</summary>
       ${[...dC.map(callRow),...dM.map(mailRow)].join("")||'<div class="meta" style="padding:8px">Nothing dismissed yet</div>'}</details>`;
     }
@@ -1690,7 +1755,7 @@ function renderQDrop(){
       if(hits.length>=12) break;
       if(matchLead(l,q)){
         const life=lifecycleOf(l);
-        hits.push({tag:life==="client"?"client":life==="support"?"person":"lead",
+        hits.push({tag:l.internal?"colleague":life==="client"?"client":life==="support"?"person":"lead",
           h:`<b>${esc(l.name||l.email)}</b> <span class="meta">${esc(l.co||l.email||l.phone||"")}</span>`,
           act:"openPerson('"+l.id+"')"});
       }
@@ -2136,6 +2201,65 @@ function selBar(matchIds){
   </div>`;
 }
 const selBtn = () => window.CANW!==false ? `<button class="fbtn ${window.__SEL.on?'active':''}" onclick="selMode()" title="Tick leads and assign them in bulk">☑ Select</button>` : "";
+/* Likely duplicates, suggested only: same phone digits, same email, or the same
+   name at the same company. Nothing is ever merged automatically; the hub just
+   stops you from having to notice by chance. */
+function duplicateSuggestions(){
+  const out=[], seenPair=new Set();
+  const add=(a,b,why)=>{
+    if(a.id===b.id) return;
+    const k=[a.id,b.id].sort().join("|");
+    if(seenPair.has(k)) return;
+    seenPair.add(k); out.push({a,b,why});
+  };
+  const byPhone={}, byMail={}, byName={};
+  LEADS.filter(l=>!l.internal).forEach(l=>{
+    [l.phone,l.altPhone].filter(Boolean).forEach(p=>{
+      const d=digits(p).slice(-9); if(d.length<9) return;
+      (byPhone[d]=byPhone[d]||[]).push(l);
+    });
+    [l.email,l.alt].filter(Boolean).forEach(e=>{
+      const m=e.toLowerCase().trim(); (byMail[m]=byMail[m]||[]).push(l);
+    });
+    const nm=(l.name||"").toLowerCase().replace(/[^a-z]/g,"");
+    const co=(l.co||"").toLowerCase().replace(/[^a-z]/g,"");
+    if(nm.length>3 && co.length>3) (byName[nm+"@"+co]=byName[nm+"@"+co]||[]).push(l);
+  });
+  Object.values(byPhone).forEach(g=>{ for(let i=1;i<g.length;i++) add(g[0],g[i],"same phone number"); });
+  Object.values(byMail).forEach(g=>{ for(let i=1;i<g.length;i++) add(g[0],g[i],"same email address"); });
+  Object.values(byName).forEach(g=>{ for(let i=1;i<g.length;i++) add(g[0],g[i],"same name at the same company"); });
+  return out.sort((x,y)=>(y.a.touches+y.b.touches)-(x.a.touches+x.b.touches));
+}
+window.dupDismiss = async (aId,bId) => {
+  const key=[aId,bId].sort().join("|");
+  const P=window.__PREFS=(window.__PREFS||{}); P.dupOk=[...(P.dupOk||[]), key];
+  await savePrefs(); toast("Marked as different people"); render(false);
+};
+const dupHidden = () => new Set(((window.__PREFS||{}).dupOk)||[]);
+
+/* what the team actually did in the last seven days, which the funnel cannot
+   show because the funnel counts stages, not work */
+function weekStats(){
+  const since=new Date(TODAY); since.setDate(since.getDate()-7);
+  const per={};
+  const row=u=>per[u]||(per[u]={calls:0, connected:0, wa:0, emails:0, meetings:0, notes:0});
+  LEADS.forEach(l=>{
+    l.logs.forEach(g=>{
+      const d=day(String(g.at).slice(0,10)); if(!d||d<since) return;
+      const u=(g.by_user||"team").split("@")[0];
+      if(g.kind==="call"){ row(u).calls++; if(!/not reached/i.test(g.detail||"")) row(u).connected++; }
+      else if(g.kind==="wa") row(u).wa++;
+      else if(g.kind==="email") row(u).emails++;
+      else if(g.kind==="meeting") row(u).meetings++;
+    });
+    l.notes.forEach(n=>{ const d=day(n.d); if(d&&d>=since) row(n.by||"team").notes++; });
+  });
+  const newLeads=LEADS.filter(l=>!l.internal && l.created && l.created>=since).length;
+  const won=LEADS.filter(l=>l.client && l.client.first_paid_at && new Date(l.client.first_paid_at)>=since).length;
+  const tickets=(window.__tickets||[]).filter(t=>new Date(t.opened_at)>=since).length;
+  return {per, newLeads, won, tickets, since};
+}
+
 /* health of one data source: newest run wins, and a source that has not succeeded
    in a while is "stale" even when nothing crashed (a job that never starts is
    invisible otherwise) */
