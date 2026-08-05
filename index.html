@@ -12,7 +12,7 @@
   --grid:#e1e0d9; --border:rgba(11,11,11,.10); --accent:#2a78d6;
   --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b; --goodtext:#006300;
   --f1:#86b6ef; --f2:#5598e7; --f3:#2a78d6; --f4:#1c5cab; --f5:#0d366b; --fgray:#c3c2b7;
-  --chipbg:#f0efec;
+  --chipbg:#f0efec; --mixpct:18%; --chipink:#52514e;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
@@ -20,7 +20,7 @@
     --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink2:#c3c2b7; --muted:#898781;
     --grid:#2c2c2a; --border:rgba(255,255,255,.10); --accent:#3987e5;
     --goodtext:#0ca30c; --f1:#9ec5f4; --f2:#6da7ec; --f3:#3987e5; --f4:#256abf; --f5:#184f95; --fgray:#52514e;
-    --chipbg:#262624;
+    --chipbg:#2c2c2a; --mixpct:30%; --chipink:#d6d5cd;
   }
 }
 :root[data-theme="dark"]{
@@ -28,7 +28,7 @@
   --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink2:#c3c2b7; --muted:#898781;
   --grid:#2c2c2a; --border:rgba(255,255,255,.10); --accent:#3987e5;
   --goodtext:#0ca30c; --f1:#9ec5f4; --f2:#6da7ec; --f3:#3987e5; --f4:#256abf; --f5:#184f95; --fgray:#52514e;
-  --chipbg:#262624;
+  --chipbg:#2c2c2a; --mixpct:30%; --chipink:#d6d5cd;
 }
 *{box-sizing:border-box}
 body{margin:0;font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--page);color:var(--ink)}
@@ -66,9 +66,9 @@ h2:first-child{margin-top:0}
 .row .who{flex:1;min-width:160px}
 .row .who .nm{font-weight:600}
 .row .who .co{color:var(--ink2);font-size:12px}
-.chip{font-size:11px;padding:2px 8px;border-radius:99px;background:var(--chipbg);color:var(--ink2);white-space:nowrap}
-.chip.coupon{background:color-mix(in srgb,var(--warn) 18%,var(--surface));color:var(--ink)}
-.chip.call{background:color-mix(in srgb,var(--accent) 15%,var(--surface));color:var(--ink)}
+.chip{font-size:11px;padding:2px 8px;border-radius:99px;background:var(--chipbg);color:var(--chipink);white-space:nowrap}
+.chip.coupon{background:color-mix(in srgb,var(--warn) var(--mixpct),var(--surface));color:var(--ink)}
+.chip.call{background:color-mix(in srgb,var(--accent) var(--mixpct),var(--surface));color:var(--ink)}
 .chip.stage{border:1px solid var(--border);background:var(--surface)}
 .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px}
 .ok .dot{background:var(--good)} .no .dot{background:var(--fgray)}
@@ -87,11 +87,26 @@ h2:first-child{margin-top:0}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 select.st,textarea.note,input.li{font:inherit;font-size:13px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);padding:6px 8px}
 textarea.note{width:100%;min-height:34px;resize:vertical}
-.notelog{display:flex;flex-direction:column;gap:4px;max-height:140px;overflow-y:auto}
-.noteitem{font-size:12.5px;border-left:2px solid var(--grid);padding:2px 8px;color:var(--ink2)}
-.noteitem.tout{border-left-color:var(--accent)}
+/* the timeline reads as one vertical thread: a rail with a dot per event */
+.notelog{display:flex;flex-direction:column;gap:0;max-height:180px;overflow-y:auto;padding-left:4px}
+.noteitem{font-size:12.5px;position:relative;border-left:2px solid var(--grid);padding:3px 8px 7px 16px;color:var(--ink2)}
+.noteitem::before{content:"";position:absolute;left:-5px;top:9px;width:6px;height:6px;border-radius:50%;
+  background:var(--surface);border:2px solid var(--muted)}
+.noteitem:hover::before{border-color:var(--accent)}
+.noteitem.tout{border-left-color:var(--grid)}
+.noteitem.tout::before{border-color:var(--accent);background:var(--accent)}
+.noteitem:last-child{border-left-color:transparent}
 #mergeov{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:50}
-.mcard{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;width:420px;max-width:min(96vw,620px);max-height:90vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+.mcard{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;width:420px;max-width:min(96vw,620px);max-height:90vh;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:10px}
+.mcard .meta{white-space:normal;overflow-wrap:anywhere}
+/* the create button: quiet, round, monochrome; it should feel premium, not loud */
+#plusbtn{width:34px;height:34px;border-radius:50%;padding:0;font-size:19px;line-height:1;font-weight:500;
+  background:var(--ink);color:var(--page);border:1px solid var(--ink);flex:none}
+#plusbtn:hover{opacity:.82;background:var(--ink)}
+/* contact details first: the two things you grab when the phone rings */
+.pcontacts{display:flex;gap:8px;flex-wrap:wrap;width:100%}
+.pcontacts .chip{font-size:12.5px;padding:5px 12px;border:1px solid var(--border);background:var(--surface);color:var(--ink)}
+.pcontacts .chip:hover{background:var(--chipbg)}
 .mcard .li{width:100%;min-width:0}
 .mcard .acts{gap:8px;flex-wrap:wrap;align-items:center}
 .mcard .acts .li{width:auto;flex:1 1 120px}
@@ -181,8 +196,8 @@ details.snip .body{margin:4px 0;padding:6px 8px;background:var(--chipbg);border-
     <div class="qwrap"><input class="search" id="q" name="hub-search" placeholder="Search everywhere: name, company, email, phone…" autocomplete="off" spellcheck="false" aria-autocomplete="none">
       <button id="qclear" style="display:none" title="Clear search" onclick="qClear()">✕</button>
       <div id="qdrop" style="display:none"></div></div>
-    <button class="btn primary" id="plusbtn" onclick="plusMenu()" title="Create something new" style="display:none">＋</button>
     <span id="hctl" style="display:flex;gap:6px;align-items:center"></span>
+    <button class="btn" id="plusbtn" onclick="plusMenu()" title="Create something new: lead, coupon, ticket, note" style="display:none">＋</button>
   </header>
   <div id="content"></div>
 </main>
@@ -397,7 +412,7 @@ const JLOC_SEL = "key,summary,phase,client_number,company,contact_name,contact_e
   "contract_model,contract_status,contract_start,contract_renewal,contract_termination,test_start,test_end,"+
   "deposit,payment_rhythm,payment_problems,mrr,vat,price_start,price_now,price_3m,price_6m,price_12m,"+
   "cubes,cubes_version,tablets,ipads,watches,manager_name,manager_email,sys_link,next_call,"+
-  "person_id,client_id,match_via,jira_updated,updated_at";
+  "person_id,client_id,match_via,manual_payer,jira_updated,updated_at";
 const JKID_SEL = "key,parent_key,client_number,project,issue_type,ticket_type,status,summary,tracking_link,"+
   "tracking_number,delivery_service,date_shipment,date_receipt,scheduled_delivery,questionnaire_sent,"+
   "questionnaire_filled,jira_created,jira_resolved,jira_updated,updated_at";
@@ -434,10 +449,11 @@ async function loadData(delta){
     sb.from("payment_problems").select("*").order("invoice_created",{ascending:false}).limit(500),
     canDelta ? sb.from("jira_comments").select("*").gt("id", RAW.mark.jcom||0).order("id").limit(300)
              : sb.from("jira_comments").select("*").order("id",{ascending:false}).limit(300),
+    sb.from("ops_hidden").select("*"),
   ]);
   const [{data:statRows, error:e3},{data:runRows},{data:ticketRows},{data:userRows},
          {data:umailRows},{data:ucallRows},{data:creqRows},{data:mbRows},{data:auditRows},
-         {data:jlocRows},{data:jkidRows},{data:ppRows},{data:jcomRows}] = small;
+         {data:jlocRows},{data:jkidRows},{data:ppRows},{data:jcomRows},{data:ohRows}] = small;
 
   let e1=null, e2=null, e4=null;
   if(!canDelta){
@@ -504,6 +520,7 @@ async function loadData(delta){
   RAW.mark.jkids = maxOf(RAW.jkids,"updated_at") || RAW.mark.jkids || "";
   RAW.mark.jcom = RAW.jcom.reduce((m,r)=>Math.max(m, r.id||0), 0);
   window.__pprobs = ppRows||[];
+  window.__opsHidden = new Map((ohRows||[]).map(r=>[r.id,r]));
   window.__locByPerson = {};
   window.__locByClient = {};
   RAW.jloc.forEach(j=>{
@@ -636,7 +653,8 @@ function leadRow(l, extra){
     l.client?`<span class="chip coupon" title="Paying client · ${esc(eur(l.client.total_paid,l.client.currency))}">💰 client</span>`:"",
     l.cp?`<span class="chip coupon ${l.cp.offer?"jump":""}" title="${esc(l.cp.code)}${l.cp.offer?" · click to copy the offer link":""}" ${l.cp.offer?`onclick="copyTxt('${esc(l.cp.offer)}','offer link');event.stopPropagation()"`:""}>🎟 ${esc(l.cp.val)}${l.cp.offer?" 🔗":""}</span>`
       :(l.coupon?'<span class="chip coupon">Coupon</span>':(/Book a Call/i.test(l.src)?'<span class="chip call">Book-a-call</span>':"")),
-    l.assigned?`<span class="chip asg" title="Lead owner: ${esc(l.assigned)}">👤 ${esc(String(l.assigned).split("@")[0])}</span>`:"",
+    l.assigned?`<span class="chip asg" title="Lead owner: ${esc(l.assigned)}">👤 ${esc(String(l.assigned).split("@")[0])}</span>`
+      :(window.CANW!==false&&terrOwner(l.cc)?`<span class="chip jump" onclick="assignLead('${l.id}','${esc(terrOwner(l.cc))}');event.stopPropagation()" title="${esc(l.cc)} is in this person's territory. One click assigns; nothing happens by itself.">👤 suggest: ${esc(String(terrOwner(l.cc)).split("@")[0])}</span>`:""),
     `<span class="chip stage">${esc(l.hub||(l.attempted?"No answer yet":l.stage))}</span>`
   ].join("");
   return `<div class="card" data-id="${l.id}">
@@ -659,8 +677,8 @@ function leadRow(l, extra){
           ${window.CANW!==false&&!l.sfId&&l.createdBy===ME?`<button class="btn" onclick="archiveLead('${l.id}');event.stopPropagation()" title="Put this lead away without deleting anything. Restorable from People → Archived. Only you can archive it because you created it.">🗃 Archive</button>`:""}
         </div>
         ${window.CANW!==false?`<div class="acts" style="margin-top:8px">
-          <button class="btn primary" onclick="waCall('${l.id}');event.stopPropagation()">+ WA call</button>
-          <button class="btn primary" onclick="waMsg('${l.id}');event.stopPropagation()">+ WA message</button>
+          <button class="btn" onclick="waCall('${l.id}');event.stopPropagation()">+ WA call</button>
+          <button class="btn" onclick="waMsg('${l.id}');event.stopPropagation()">+ WA message</button>
           <button class="btn" onclick="logCall('${l.id}');event.stopPropagation()">+ Log call</button>
           <select class="st" onchange="assignLead('${l.id}',this.value);this.selectedIndex=0" onclick="event.stopPropagation()" title="Lead owner">
             <option value="">👤 ${l.assigned?esc(String(l.assigned).split("@")[0]):"Assign lead…"}</option>
@@ -706,6 +724,12 @@ function leadRow(l, extra){
    data and can never be deleted; the [pt:] tag marks the live ones */
 const imported = g => /\(Placetel\)|\[pt:/.test(g.detail||"");
 
+/* territory suggestion: the owner of a country, but only when it is unambiguous */
+function terrOwner(cc){
+  if(!cc||cc==="?") return null;
+  const owners=(window.__users||[]).filter(u=>Array.isArray(u.territory)&&u.territory.includes(cc));
+  return owners.length===1?owners[0].email:null;
+}
 /* people a ticket belongs to: by link or by email */
 const ticketsOf = l => {
   const em=(l.email||"").toLowerCase(), alt=(l.alt||"").toLowerCase();
@@ -726,13 +750,20 @@ function ppOf(l){
   return (window.__pprobs||[]).filter(p=>p.email&&ems.includes(p.email));
 }
 const jiraLink = key => ORG().jiraUrl ? `<a class="sflink" href="${esc(ORG().jiraUrl)}/browse/${esc(key)}" target="_blank" onclick="event.stopPropagation()">${esc(key)} ↗</a>` : esc(key);
-/* UPS wants the locale in the link; DACH customers get the German page */
+/* UPS locale: flip the loc= value in the link Jira gives us (de_DE for DACH,
+   en_EN otherwise), never hand a German page to a US customer */
 function upsLink(kid, loc){
-  const num=kid.tracking_number||((kid.tracking_link||"").match(/tracknum=([A-Z0-9]+)/i)||[])[1];
-  if(!num) return kid.tracking_link||null;
-  const dach=(loc&&loc.language)==="DE"||/^(\+49|\+43|\+41|0049|0043|0041)/.test((loc&&loc.phone||"").replace(/[\s-]/g,""));
-  return `https://www.ups.com/track?loc=${dach?"de_DE":"en_US"}&tracknum=${encodeURIComponent(num)}&requester=ST/trackdetails`;
+  // the phone prefix decides: Jira's Language field is often left on DE even
+  // for US customers (seen on real tickets), the number does not lie
+  const ph=((loc&&loc.phone)||"").replace(/[\s-]/g,"");
+  const dach=ph?/^(\+|00)(49|43|41)/.test(ph):(loc&&loc.language)==="DE";
+  const want=dach?"de_DE":"en_EN";
+  if(kid.tracking_link) return kid.tracking_link.replace(/([?&]loc=)[A-Za-z_]+/,"$1"+want);
+  if(kid.tracking_number) return `https://www.ups.com/track?loc=${want}&tracknum=${encodeURIComponent(kid.tracking_number)}&requester=ST/trackdetails`;
+  return null;
 }
+/* SYS deep link: the customer-team search prefilled with the manager's email */
+const sysLink = em => em&&ORG().sysCustomerUrl ? ORG().sysCustomerUrl.replace("{email}", encodeURIComponent(em)) : null;
 const CLOSED_KID=/^(DELIVERED|CANCELED|LOST \/ RETURNED|RK_CLOSED|Done)$/i;
 const kidOpen=k=>!k.jira_resolved&&!CLOSED_KID.test(k.status||"");
 const dstr=d=>d?new Date(d+"T00:00:00").toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}):null;
@@ -783,7 +814,9 @@ function locBlock(l){
         ${dates?`${esc(dates)}<br>`:""}
         ${eq?`Equipment: ${esc(eq)}<br>`:""}
         ${j.manager_email?`Manager: ${esc(j.manager_name||"")} <span class="chip jump" onclick="copyTxt('${esc(j.manager_email)}','manager email')" title="Click to copy">✉ ${esc(j.manager_email)}</span>
-          ${j.sys_link?`<a class="sflink" href="${esc(j.sys_link)}" target="_blank">SYS ↗</a>`:""}<br>`:(j.sys_link?`<a class="sflink" href="${esc(j.sys_link)}" target="_blank">SYS ↗</a><br>`:"")}
+          ${sysLink(j.manager_email)?`<a class="sflink" href="${esc(sysLink(j.manager_email))}" target="_blank" title="Open this customer team in SYS">SYS ↗</a>`:(j.sys_link?`<a class="sflink" href="${esc(j.sys_link)}" target="_blank">SYS ↗</a>`:"")}<br>`:(j.sys_link?`<a class="sflink" href="${esc(j.sys_link)}" target="_blank">SYS ↗</a><br>`:"")}
+        ${window.CANW!==false?`<label class="chip" style="cursor:pointer" title="This customer pays by bank transfer or outside Stripe: the payment consistency checks leave them alone.">
+          <input type="checkbox" ${j.manual_payer?"checked":""} onchange="payerFlip('${j.key}',this.checked)"> 💶 pays outside Stripe</label><br>`:(j.manual_payer?`<span class="chip">💶 pays outside Stripe</span><br>`:"")}
         ${ships.length?`Shipments:<br>${ships.map(k=>`&nbsp;&nbsp;📦 ${esc(k.summary||k.key)} · ${esc(k.status||"")}${k.date_shipment?" · shipped "+dstr(k.date_shipment):""}${k.date_receipt?" · received "+dstr(k.date_receipt):""}
           ${upsLink(k,j)?`<a class="sflink" href="${esc(upsLink(k,j))}" target="_blank">${esc(k.delivery_service||"track")} ↗</a>`:""} ${jiraLink(k.key)}
           ${k.questionnaire_sent&&!k.questionnaire_filled?`<span class="chip" style="color:var(--serious)">questionnaire not filled since ${dstr(k.questionnaire_sent)}</span>`:""}`).join("<br>")}<br>`:""}
@@ -793,8 +826,56 @@ function locBlock(l){
       </div></details>`;
   };
   return `<div style="width:100%" onclick="event.stopPropagation()" id="locs-${l.id}">
-    <div class="meta" style="margin:4px 0 2px">Locations (${locs.length})</div>${locs.map(row).join("")}</div>`;
+    <div class="meta" style="margin:4px 0 2px">Locations (${locs.length})
+      ${window.CANW!==false?`<span class="chip jump" onclick="linkLocation('${l.id}')" title="Attach another Jira location to this person (a chain owner has several)">🔗 link another…</span>`:""}
+    </div>${locs.map(row).join("")}</div>`;
 }
+/* attach a Jira location to a person by hand (Soho Vibes belongs to Terrance,
+   but its ticket uses a different email, so no rule can know) */
+window.linkLocation = pid => {
+  if(window.CANW===false) return;
+  let ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  ov=document.createElement("div"); ov.id="mergeov";
+  ov.innerHTML=`<div class="mcard"><h3>🔗 Link a location to ${esc((byId[pid]||{}).name||"this person")}</h3>
+    <div class="meta">Search the mirrored Jira locations. Linking is reversible: link it to someone else later and it simply moves.</div>
+    <input class="li" id="ll-q" placeholder="Company, contact, email or CS key…" oninput="llSearch('${pid}')">
+    <div id="ll-res" style="max-height:260px;overflow-y:auto"></div>
+    <div class="acts" style="justify-content:flex-end"><button class="btn" onclick="document.getElementById('mergeov').remove()">Cancel</button></div></div>`;
+  ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
+  document.body.appendChild(ov);
+  ov.querySelector("#ll-q").focus();
+  llSearch(pid);
+};
+window.llSearch = pid => {
+  const q=((document.getElementById("ll-q")||{}).value||"").toLowerCase().trim();
+  const res=document.getElementById("ll-res"); if(!res) return;
+  const pool=RAW.jloc.filter(j=>{
+    if(q) return [j.key,j.company,j.contact_name,j.contact_email,j.manager_email,j.summary,j.client_number]
+      .some(v=>(v||"").toLowerCase().includes(q));
+    return !j.person_id;                       // no search: show the unlinked ones
+  }).slice(0,12);
+  res.innerHTML=pool.map(j=>`<div class="mhit" onclick="llPick('${pid}','${j.key}')">
+    <b>📍 ${esc(j.company||j.summary||j.key)}</b> <span class="meta">${esc(j.key)} · ${esc((j.phase||"").replace(/^CS_/,""))}${j.contact_email?" · "+esc(j.contact_email):""}${j.person_id?" · currently linked to "+esc((byId[j.person_id]||{}).name||"someone"):""}</span>
+  </div>`).join("")||'<div class="meta" style="padding:8px">No location matches</div>';
+};
+window.llPick = async (pid,key) => {
+  const {error}=await sb.rpc("link_location",{loc_key:key, target:pid});
+  if(error){ hubAlert("Could not link", esc(error.message)); return; }
+  const j=RAW.jloc.find(x=>x.key===key);
+  if(j){ j.person_id=pid; j.match_via="manual"; }
+  window.__locByPerson={};
+  RAW.jloc.forEach(x=>{ if(x.person_id) (window.__locByPerson[x.person_id]=window.__locByPerson[x.person_id]||[]).push(x); });
+  logAudit("link-location",{person_id:pid, detail:key+" linked"});
+  const ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  toast("Location linked ✓"); render(false);
+};
+window.payerFlip = async (key,on) => {
+  const {error}=await sb.rpc("set_manual_payer",{loc_key:key, val:!!on});
+  if(error){ hubAlert("Could not save", esc(error.message)); return; }
+  const j=RAW.jloc.find(x=>x.key===key); if(j) j.manual_payer=!!on;
+  logAudit("manual-payer",{detail:key+" → "+(on?"pays outside Stripe":"pays via Stripe")});
+  toast(on?"Marked: pays outside Stripe":"Marked: pays via Stripe"); render(false);
+};
 /* ---------- Operations: ONE list of everything operationally open ----------
    Each item: what, who, whose move it is, and how old. Computed fresh from the
    Jira mirror + Stripe problems; nothing is stored twice. */
@@ -809,20 +890,21 @@ function opsItems(){
   const dFrom=d=>d?Math.max(0,Math.round((today-new Date(String(d).slice(0,10)+"T00:00:00"))/86400000)):0;
   for(const k of RAW.jkids){
     const j=locByKey[k.parent_key];
+    const qk=dFrom(k.jira_updated)>30;   // untouched in Jira for a month: probably done, just never closed
     if(k.project==="RK"&&kidOpen(k)){
-      out.push({kind:"service", icon:"🔧", our:k.status!=="RK_DELIVERY_WAITING", age:dFrom(k.jira_created),
+      out.push({id:"service:"+k.key, quiet:qk, kind:"service", icon:"🔧", our:k.status!=="RK_DELIVERY_WAITING", age:dFrom(k.jira_created),
         title:(k.summary||k.key)+" · "+(k.status||""), who:j?personLoc(j):esc(k.summary||k.key), key:k.key, loc:j});
     }
     if(k.project==="SH"&&kidOpen(k)){
-      out.push({kind:"shipment", icon:"📦", our:k.status==="DATA VALIDATION", age:dFrom(k.date_shipment||k.jira_created),
+      out.push({id:"shipment:"+k.key, quiet:qk, kind:"shipment", icon:"📦", our:k.status==="DATA VALIDATION", age:dFrom(k.date_shipment||k.jira_created),
         title:(k.status||"open")+(k.date_shipment?" · shipped "+dstr(k.date_shipment):""), who:j?personLoc(j):esc(k.summary||k.key), key:k.key, loc:j, kid:k});
       if(k.questionnaire_sent&&!k.questionnaire_filled)
-        out.push({kind:"questionnaire", icon:"📋", our:dFrom(k.questionnaire_sent)>7, age:dFrom(k.questionnaire_sent),
+        out.push({id:"questionnaire:"+k.key, quiet:qk, kind:"questionnaire", icon:"📋", our:dFrom(k.questionnaire_sent)>7, age:dFrom(k.questionnaire_sent),
           title:"questionnaire sent "+dstr(k.questionnaire_sent)+", not filled", who:j?personLoc(j):esc(k.summary||k.key), key:k.key, loc:j});
     }
   }
   for(const p of (window.__pprobs||[])){
-    out.push({kind:"payment", icon:"💳", our:true, age:dFrom(p.invoice_created),
+    out.push({id:"payment:"+p.invoice_id, quiet:dFrom(p.invoice_created)>60, kind:"payment", icon:"💳", our:true, age:dFrom(p.invoice_created),
       title:Math.round((p.amount||0)/100)+"€ "+(p.status==="uncollectible"?"uncollectible":"unpaid")
         +(p.attempts?" · "+p.attempts+" attempt"+(p.attempts>1?"s":""):"")
         +(p.next_retry?" · retry "+new Date(p.next_retry).toLocaleDateString():"")
@@ -833,35 +915,53 @@ function opsItems(){
   for(const j of RAW.jloc){
     if(j.test_end&&/TEST/i.test(j.phase||"")){
       const d=dTo(j.test_end);
-      if(d<=60) out.push({kind:"test", icon:"🧪", our:d<=14, age:Math.max(0,-d),
+      if(d<=60) out.push({id:"test:"+j.key, kind:"test", icon:"🧪", our:d<=14, age:Math.max(0,-d),
         title:"test period "+(d<0?"ended "+(-d)+"d ago":"ends in "+d+"d")+" ("+dstr(j.test_end)+")", who:personLoc(j), key:j.key, loc:j, due:d});
     }
     if(j.contract_renewal&&(j.phase||"")==="CS_CONTRACT"){
       const d=dTo(j.contract_renewal);
-      if(d<=60&&d>=-30) out.push({kind:"renewal", icon:"🔄", our:d<=30, age:Math.max(0,-d),
+      if(d<=60&&d>=-30) out.push({id:"renewal:"+j.key, kind:"renewal", icon:"🔄", our:d<=30, age:Math.max(0,-d),
         title:"renewal "+(d<0?(-d)+"d overdue":"in "+d+"d")+" ("+dstr(j.contract_renewal)+")", who:personLoc(j), key:j.key, loc:j, due:d});
     }
-    // consistency checks: the mirror lets us see what no single system shows
+    // consistency checks: the mirror lets us see what no single system shows.
+    // Customers marked "pays outside Stripe" are exempt from the money checks.
     const cl=j.client_id?cliById[j.client_id]:null;
-    if(j.mrr&&cl&&cl.mrr!=null&&Math.abs(j.mrr-cl.mrr/100)>1)
-      out.push({kind:"check", icon:"⚖", our:true, age:0,
-        title:"Jira says "+j.mrr+"€ MRR, Stripe collects "+Math.round(cl.mrr/100)+"€", who:personLoc(j), key:j.key, loc:j});
-    // "no recent payment" must respect how often they are billed: a yearly payer
-    // is perfectly healthy 10 months after the last invoice
-    const rhythmDays=/year|jähr|annual/i.test(j.payment_rhythm||"")?400:/quart/i.test(j.payment_rhythm||"")?120:60;
-    if((j.phase||"")==="CS_CONTRACT"&&cl&&cl.last_paid_at&&dFrom(cl.last_paid_at)>rhythmDays)
-      out.push({kind:"check", icon:"⚖", our:true, age:dFrom(cl.last_paid_at),
-        title:"active contract, last payment "+dFrom(cl.last_paid_at)+"d ago ("+esc(j.payment_rhythm||"monthly")+")", who:personLoc(j), key:j.key, loc:j});
-    const hasPP=(window.__pprobs||[]).some(p=>p.email&&[j.contact_email,j.manager_email,cl&&cl.email].filter(Boolean).map(e=>e.toLowerCase()).includes(p.email));
-    if(j.payment_problems===true&&!hasPP)
-      out.push({kind:"check", icon:"⚖", our:false, age:0,
-        title:"Jira payment-problems flag is set but Stripe shows nothing failing (flag may be stale)", who:personLoc(j), key:j.key, loc:j});
-    if(j.payment_problems===false&&hasPP)
-      out.push({kind:"check", icon:"⚖", our:true, age:0,
-        title:"Stripe shows failing payments but the Jira flag is off", who:personLoc(j), key:j.key, loc:j});
+    if(!j.manual_payer){
+      if(j.mrr&&cl&&cl.mrr!=null&&Math.abs(j.mrr-cl.mrr/100)>1)
+        out.push({id:"check-mrr:"+j.key, kind:"check", icon:"⚖", our:true, age:0,
+          title:"Jira says "+j.mrr+"€ MRR, Stripe collects "+Math.round(cl.mrr/100)+"€", who:personLoc(j), key:j.key, loc:j});
+      // "no recent payment" must respect how often they are billed: a yearly payer
+      // is perfectly healthy 10 months after the last invoice
+      const rhythmDays=/year|jähr|annual/i.test(j.payment_rhythm||"")?400:/quart/i.test(j.payment_rhythm||"")?120:60;
+      if((j.phase||"")==="CS_CONTRACT"&&cl&&cl.last_paid_at&&dFrom(cl.last_paid_at)>rhythmDays)
+        out.push({id:"check-pay:"+j.key, kind:"check", icon:"⚖", our:true, age:dFrom(cl.last_paid_at),
+          title:"active contract, last payment "+dFrom(cl.last_paid_at)+"d ago ("+esc(j.payment_rhythm||"monthly")+")", who:personLoc(j), key:j.key, loc:j});
+      const hasPP=(window.__pprobs||[]).some(p=>p.email&&[j.contact_email,j.manager_email,cl&&cl.email].filter(Boolean).map(e=>e.toLowerCase()).includes(p.email));
+      if(j.payment_problems===true&&!hasPP)
+        out.push({id:"check-flagstale:"+j.key, kind:"check", icon:"⚖", our:false, age:0,
+          title:"Jira payment-problems flag is set but Stripe shows nothing failing (flag may be stale)", who:personLoc(j), key:j.key, loc:j});
+      if(j.payment_problems===false&&hasPP)
+        out.push({id:"check-flagoff:"+j.key, kind:"check", icon:"⚖", our:true, age:0,
+          title:"Stripe shows failing payments but the Jira flag is off", who:personLoc(j), key:j.key, loc:j});
+    }
   }
   return out;
 }
+window.opsHide = async id => {
+  if(window.CANW===false) return;
+  const {error}=await sb.from("ops_hidden").insert({id, who:ME});
+  if(error){ hubAlert("Could not save", esc(error.message)); return; }
+  (window.__opsHidden=window.__opsHidden||new Map()).set(id,{id,who:ME,at:new Date().toISOString()});
+  logAudit("ops",{detail:"marked not active: "+id});
+  toast("Marked not active, restorable below"); render(false);
+};
+window.opsRestore = async id => {
+  const {error}=await sb.from("ops_hidden").delete().eq("id",id);
+  if(error){ hubAlert("Could not restore", esc(error.message)); return; }
+  (window.__opsHidden||new Map()).delete(id);
+  logAudit("ops",{detail:"restored to active: "+id});
+  toast("Back in the list"); render(false);
+};
 /* lifecycle: client (paid), lead (came in via sales), support-only (only ever wrote to support) */
 function lifecycleOf(l){
   if(l.client) return "client";
@@ -876,21 +976,26 @@ function phead(l){
   const life=lifecycleOf(l);
   const lchip = life==="client"?'<span class="chip life-client">💰 client</span>'
     : life==="support"?'<span class="chip">🎧 support-only</span>':'<span class="chip life-lead">✦ lead</span>';
+  /* contacts first (the phone is ringing, grab email + number), then status,
+     then shortcuts. Anything with a zero count stays invisible. */
   return `<div class="phead" onclick="event.stopPropagation()">
+    <div class="pcontacts">
+      ${l.email?`<span class="chip jump" onclick="copyTxt('${esc(l.email)}','email')" title="Click to copy">✉ ${esc(l.email)}</span>`:""}
+      ${l.phone?`<span class="chip jump" onclick="copyTxt('${esc(l.phone)}','phone number')" title="Click to copy">☎ ${esc(l.phone)}</span>`:""}
+      ${l.alt?`<span class="chip jump" onclick="copyTxt('${esc(l.alt)}','second email')" title="Second email, kept from a merge. Click to copy">✉ ${esc(l.alt)}</span>`:""}
+      ${l.altPhone?`<span class="chip jump" onclick="copyTxt('${esc(l.altPhone)}','second phone')" title="Second phone, kept from a merge. Click to copy">☎ ${esc(l.altPhone)}</span>`:""}
+    </div>
     ${lchip}
-    ${tks.length?`<span class="chip jump" onclick="jumpSearch('support','${esc(l.email||l.name)}')" title="Open their tickets in Support">🎫 ${openT} open · ${tks.length} total →</span>`:""}
-    ${window.CANW!==false?`<span class="chip jump" onclick="newTicket('${l.id}')" title="Open a support ticket for this person">🎫 ＋ ticket</span>
-    <span class="chip jump coupon" onclick="newCoupon('${l.id}')" title="Issue a discount code through the admin panel">🎟 ＋ coupon</span>`:""}
-    ${l.client?`<span class="chip jump life-client" onclick="jumpSearch('clients','${esc(l.client.email||l.email||l.name)}')" title="Open in Clients">💰 ${esc(eur(l.client.total_paid,l.client.currency))} · ${l.client.payments}× paid →</span>`:""}
-    ${locsFor(l).length?`<span class="chip jump" onclick="document.getElementById('locs-${l.id}')?.scrollIntoView({behavior:'smooth'})" title="Contracts, shipments and service from Jira">📍 ${locsFor(l).length} location${locsFor(l).length>1?"s":""}</span>`:""}
-    ${ppOf(l).length?`<span class="chip jump" style="color:var(--crit)" onclick="go('ops');window.__OPS={kind:'payment'}" title="${esc(ppOf(l).map(p=>Math.round(p.amount/100)+"€ · "+(p.reason||p.status)).join(" · "))}">⚠ ${ppOf(l).length} failed payment${ppOf(l).length>1?"s":""} →</span>`:""}
-    ${l.coupons.length?`<span class="chip jump coupon" onclick="jumpSearch('coupons','${esc(l.email||l.name)}')" title="Open in Coupons">🎟 ${actC} active · ${l.coupons.length} issued →</span>`:""}
     ${l.hub||l.stage?`<span class="chip stage">${esc(l.hub||l.stage)}</span>`:""}
     ${l.due&&day(l.due)&&day(l.due)>TODAY?`<span class="chip" title="Personal reminder set">⏰ ${day(l.due).toLocaleDateString(undefined,{day:"numeric",month:"short"})}</span>`:""}
-    ${l.email?`<span class="chip jump" onclick="copyTxt('${esc(l.email)}','email')" title="Click to copy">✉ ${esc(l.email)}</span>`:""}
-    ${l.alt?`<span class="chip jump" onclick="copyTxt('${esc(l.alt)}','second email')" title="Second email, kept from a merge. Click to copy">✉ ${esc(l.alt)}</span>`:""}
-    ${l.phone?`<span class="chip jump" onclick="copyTxt('${esc(l.phone)}','phone number')" title="Click to copy">☎ ${esc(l.phone)}</span>`:""}
-    ${l.altPhone?`<span class="chip jump" onclick="copyTxt('${esc(l.altPhone)}','second phone')" title="Second phone, kept from a merge. Click to copy">☎ ${esc(l.altPhone)}</span>`:""}
+    ${l.client?`<span class="chip jump life-client" onclick="jumpSearch('clients','${esc(l.client.email||l.email||l.name)}')" title="Open in Clients">💰 ${esc(eur(l.client.total_paid,l.client.currency))} · ${l.client.payments}× paid →</span>`:""}
+    ${ppOf(l).length?`<span class="chip jump" style="color:var(--crit)" onclick="go('ops');window.__OPS={kind:'payment'}" title="${esc(ppOf(l).map(p=>Math.round(p.amount/100)+"€ · "+(p.reason||p.status)).join(" · "))}">⚠ ${ppOf(l).length} failed payment${ppOf(l).length>1?"s":""} →</span>`:""}
+    ${locsFor(l).length?`<span class="chip jump" onclick="document.getElementById('locs-${l.id}')?.scrollIntoView({behavior:'smooth'})" title="Contracts, shipments and service from Jira">📍 ${locsFor(l).length} location${locsFor(l).length>1?"s":""}</span>`:""}
+    ${openT?`<span class="chip jump" onclick="jumpSearch('support','${esc(l.email||l.name)}')" title="Open their tickets in Support">🎫 ${openT} open →</span>`:""}
+    ${actC?`<span class="chip jump coupon" onclick="jumpSearch('coupons','${esc(l.email||l.name)}')" title="Open in Coupons">🎟 ${actC} active →</span>`:""}
+    ${window.CANW!==false?`<span class="chip jump" onclick="newTicket('${l.id}')" title="Open a support ticket for this person">🎫 ＋ ticket</span>
+    <span class="chip jump" onclick="newCoupon('${l.id}')" title="Issue a discount code through the admin panel">🎟 ＋ coupon</span>
+    ${!locsFor(l).length?`<span class="chip jump" onclick="linkLocation('${l.id}')" title="Attach one of the Jira locations to this person">📍 link…</span>`:""}`:""}
   </div>`;
 }
 /* one person, whole story: notes, calls, WA, emails, coupons, tickets, payments in one thread */
@@ -1052,6 +1157,12 @@ window.doMerge = async (keepId, dupId) => {
   const r1=await sb.from("people").update({email:null, merged_into:keepId}).eq("id",dup.id);
   const r2=await sb.from("people").update({email:primary||null, alt_email:altPick}).eq("id",keepId);
   if(r1.error||r2.error){ hubAlert("Merge partially failed", esc((r1.error||r2.error).message)); return; }
+  // Jira locations follow the surviving person too (they are server-written,
+  // so the move goes through the guarded function)
+  for(const j of RAW.jloc.filter(x=>x.person_id===dup.id)){
+    const {error:le}=await sb.rpc("link_location",{loc_key:j.key, target:keepId});
+    if(!le) j.person_id=keepId;
+  }
   await logAudit("merge",{person_id:keepId,
     detail:(dup.name||"?")+" ("+(dup.email||dup.phone||"no contact")+") merged into "+(keep.name||"?"),
     undo:{dup_id:dup.id, dup_email:dup.email||null, keep_id:keepId,
@@ -1731,34 +1842,45 @@ const PANELS = {
     }
   },
   ops: {
-    title:"Operations", count:()=>{ try{ return opsItems().filter(i=>i.our).length||""; }catch(e){ return "!"; } },
+    title:"Operations", count:()=>{ try{ const h=window.__opsHidden||new Map();
+      return opsItems().filter(i=>i.our&&!i.quiet&&!h.has(i.id)).length||""; }catch(e){ return "!"; } },
     render(){
       const O=window.__OPS||(window.__OPS={kind:"all"});
-      const all=opsItems();
+      const all=opsItems(), H=window.__opsHidden||new Map();
       const KINDS=[["all","Everything"],["payment","💳 Payments"],["service","🔧 Service"],["shipment","📦 Shipments"],
         ["questionnaire","📋 Questionnaires"],["test","🧪 Test periods"],["renewal","🔄 Renewals"],["check","⚖ Checks"]];
-      const cnt=k=>k==="all"?all.length:all.filter(i=>i.kind===k).length;
       const arr=(O.kind==="all"?all:all.filter(i=>i.kind===O.kind)).sort((a,b)=>b.age-a.age);
       const q=(document.getElementById("q").value||"").toLowerCase().trim();
       const shown=q?arr.filter(i=>(i.who+" "+i.title+" "+(i.key||"")+" "+(i.email||"")).toLowerCase().includes(q)):arr;
-      const ours=shown.filter(i=>i.our), theirs=shown.filter(i=>!i.our);
+      const hidden=shown.filter(i=>H.has(i.id));
+      const live=shown.filter(i=>!H.has(i.id));
+      const ours=live.filter(i=>i.our&&!i.quiet), theirs=live.filter(i=>!i.our&&!i.quiet), quiet=live.filter(i=>i.quiet);
+      const cnt=k=>{const a=(k==="all"?all:all.filter(i=>i.kind===k)).filter(i=>!H.has(i.id)&&!i.quiet); return a.length;};
       const row=i=>{
         const person=i.loc&&i.loc.person_id&&byId[i.loc.person_id];
         const openAct=person?`openPerson('${person.id}')`:(i.email?`jumpSearch('people','${esc(i.email)}')`:"");
+        const hid=H.has(i.id);
         return `<div class="card"><div class="row" ${openAct?`onclick="${openAct}"`:'style="cursor:default"'}>
           <div class="who"><span class="nm">${i.icon} ${i.who}</span><div class="co">${esc(i.title)}</div></div>
           ${i.key?`<span class="chip">${jiraLink(i.key)}</span>`:""}
           ${i.kid&&upsLink(i.kid,i.loc)?`<a class="chip jump" href="${esc(upsLink(i.kid,i.loc))}" target="_blank" onclick="event.stopPropagation()">📦 track ↗</a>`:""}
           ${i.pp?`<button class="btn" onclick="copyTxt('${esc(i.email||"")}','email');event.stopPropagation()" title="Copy email">📋 ✉</button>`:""}
+          ${window.CANW!==false?(hid
+            ?`<button class="btn" onclick="opsRestore('${i.id}');event.stopPropagation()" title="Bring it back to the active list">↩</button>`
+            :`<button class="btn" onclick="opsHide('${i.id}');event.stopPropagation()" title="Not actually being worked on? Mark it not active. Jira stays untouched, restorable below.">✓</button>`):""}
           <span class="meta ${i.age>=14?'quiet':''}">${i.age?i.age+"d old":(i.due!=null&&i.due>0?"in "+i.due+"d":"now")}</span>
         </div></div>`;
       };
-      return `<p class="hint">Everything operationally open across all clients, in one place: read straight from Jira and Stripe, updated by the sync, nothing editable here. "Our move" needs someone on our side to act; the folded list waits on customers, carriers or banks. Amounts unpaid: ${Math.round((window.__pprobs||[]).reduce((a,p)=>a+(p.amount||0),0)/100).toLocaleString()}€.</p>
+      return `<p class="hint">What is actually moving right now, read from Jira and Stripe. Anything untouched for 30+ days folds into "quiet" below: still open in the source, probably finished in reality. ✓ marks an item not active by hand (Jira is never touched). Unpaid right now: ${Math.round((window.__pprobs||[]).reduce((a,p)=>a+(p.amount||0),0)/100).toLocaleString()}€.</p>
       <div class="filters">${KINDS.map(([k,lb])=>`<button class="fbtn ${O.kind===k?'active':''}" onclick="window.__OPS.kind='${k}';render()">${lb} ${cnt(k)?"("+cnt(k)+")":""}</button>`).join("")}</div>
       <h2>Our move (${ours.length})</h2>
       ${ours.map(row).join("")||'<div class="empty">Nothing waiting on us 🎉</div>'}
       <details class="tbl"><summary>⏳ Waiting on others (${theirs.length}): customers, carriers, banks</summary>
-      ${theirs.map(row).join("")||'<div class="meta" style="padding:8px">Nothing</div>'}</details>`;
+      ${theirs.map(row).join("")||'<div class="meta" style="padding:8px">Nothing</div>'}</details>
+      <details class="tbl"><summary>🌙 Quiet for 30+ days (${quiet.length}): open in Jira or Stripe, probably finished in reality</summary>
+      ${quiet.map(row).join("")||'<div class="meta" style="padding:8px">Nothing</div>'}</details>
+      ${hidden.length?`<details class="tbl"><summary>✓ Marked not active by hand (${hidden.length})</summary>
+      ${hidden.map(row).join("")}</details>`:""}`;
     }
   },
   people: {
@@ -1868,6 +1990,8 @@ function usersAdmin(){
       <input class="li" style="width:48px;padding:2px 6px;font-size:12px" value="${esc(u.placetel_ext||"")}" onchange="uSet('${esc(u.email)}','placetel_ext',this.value.trim()||null)"></label>
     <label class="chip" title="Placetel SIP peer of this person${ORG().peerExample?" (looks like "+ORG().peerExample+")":""}. The live call feed uses it to attribute calls; ask Claude to read it out of the events after their first call.">📟 peer
       <input class="li" style="width:150px;padding:2px 6px;font-size:12px" value="${esc(u.placetel_peer||"")}" onchange="uSet('${esc(u.email)}','placetel_peer',this.value.trim()||null)"></label>
+    <label class="chip" title="Country codes this person owns, comma separated (US, CA, GB…). Unassigned leads from these countries show a one-click suggestion chip; nothing is ever assigned automatically.">🌍 territory
+      <input class="li" style="width:120px;padding:2px 6px;font-size:12px" placeholder="US, CA, GB" value="${esc((u.territory||[]).join(", "))}" onchange="uSet('${esc(u.email)}','territory',this.value.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean))"></label>
     ${isMe?'<span class="chip">you</span>':`<button class="btn" onclick="uDel('${esc(u.email)}')" title="Remove from the hub">🗑</button>`}
     <div style="width:100%;display:flex;gap:4px;flex-wrap:wrap">
       ${TABKEYS.map(k=>`<label class="chip" style="cursor:pointer" title="Tab visible for this user (user-managers always see everything)"><input type="checkbox" ${(u.tabs||[]).includes(k)?"checked":""} onchange="uTab('${esc(u.email)}','${k}',this.checked)"> ${PANELS[k]?PANELS[k].title:k}</label>`).join("")}
