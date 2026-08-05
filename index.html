@@ -390,7 +390,16 @@ async function fetchAll(table, sel, orderCol){
    dataset, which keeps a whole team inside the free bandwidth allowance.
    Merging is additive: rows are updated in place, never dropped, so nothing can
    vanish from a timeline. Deletions and merges are caught by the row counts. */
-const RAW = { people:[], touches:[], coupons:[], tmsgs:[], mark:{} };
+const RAW = { people:[], touches:[], coupons:[], tmsgs:[], jloc:[], jkids:[], jcom:[], mark:{} };
+/* Jira mirror columns the dashboard actually shows (passwords never exist in the mirror) */
+const JLOC_SEL = "key,summary,phase,client_number,company,contact_name,contact_email,phone,country,language,"+
+  "contract_model,contract_status,contract_start,contract_renewal,contract_termination,test_start,test_end,"+
+  "deposit,payment_rhythm,payment_problems,mrr,vat,price_start,price_now,price_3m,price_6m,price_12m,"+
+  "cubes,cubes_version,tablets,ipads,watches,manager_name,manager_email,sys_link,next_call,"+
+  "person_id,client_id,match_via,jira_updated,updated_at";
+const JKID_SEL = "key,parent_key,client_number,project,issue_type,ticket_type,status,summary,tracking_link,"+
+  "tracking_number,delivery_service,date_shipment,date_receipt,scheduled_delivery,questionnaire_sent,"+
+  "questionnaire_filled,jira_created,jira_resolved,jira_updated,updated_at";
 const upsertRows = (arr, rows, key) => {
   if(!rows || !rows.length) return arr;
   const ix = new Map(arr.map((r,i)=>[r[key],i]));
@@ -414,9 +423,20 @@ async function loadData(delta){
     sb.from("coupon_requests").select("*").order("id",{ascending:false}).limit(50),
     sb.from("mailboxes").select("email,owner_email,host,port,active,ok,error,last_sync").order("email"),
     sb.from("audit").select("*").order("at",{ascending:false}).limit(400),
+    // Jira mirror: locations always (slim, ~360 rows), children only the OPEN
+    // ones (closed history loads lazily per person), comments newest first
+    canDelta ? sb.from("jira_locations").select(JLOC_SEL).gt("updated_at", RAW.mark.jloc||"").limit(500)
+             : sb.from("jira_locations").select(JLOC_SEL).order("key").limit(1000),
+    canDelta ? sb.from("jira_children").select(JKID_SEL).gt("updated_at", RAW.mark.jkids||"").limit(1000)
+             : sb.from("jira_children").select(JKID_SEL).is("jira_resolved",null)
+                 .not("status","in",'("DELIVERED","CANCELED","LOST / RETURNED","RK_CLOSED","Done")').limit(2000),
+    sb.from("payment_problems").select("*").order("invoice_created",{ascending:false}).limit(500),
+    canDelta ? sb.from("jira_comments").select("*").gt("id", RAW.mark.jcom||0).order("id").limit(300)
+             : sb.from("jira_comments").select("*").order("id",{ascending:false}).limit(300),
   ]);
   const [{data:statRows, error:e3},{data:runRows},{data:ticketRows},{data:userRows},
-         {data:umailRows},{data:ucallRows},{data:creqRows},{data:mbRows},{data:auditRows}] = small;
+         {data:umailRows},{data:ucallRows},{data:creqRows},{data:mbRows},{data:auditRows},
+         {data:jlocRows},{data:jkidRows},{data:ppRows},{data:jcomRows}] = small;
 
   let e1=null, e2=null, e4=null;
   if(!canDelta){
@@ -471,6 +491,28 @@ async function loadData(delta){
   window.__trayCalls = ucallRows||[];
   window.__couponReqs = creqRows||[];
   window.__mailboxes = mbRows||[];
+  // Jira mirror merge (additive, same rules as the big tables)
+  if(canDelta){
+    upsertRows(RAW.jloc, jlocRows, "key");
+    upsertRows(RAW.jkids, jkidRows, "key");
+    upsertRows(RAW.jcom, jcomRows, "id");
+  } else {
+    RAW.jloc = jlocRows||[]; RAW.jkids = jkidRows||[]; RAW.jcom = (jcomRows||[]).reverse();
+  }
+  RAW.mark.jloc = maxOf(RAW.jloc,"updated_at") || RAW.mark.jloc || "";
+  RAW.mark.jkids = maxOf(RAW.jkids,"updated_at") || RAW.mark.jkids || "";
+  RAW.mark.jcom = RAW.jcom.reduce((m,r)=>Math.max(m, r.id||0), 0);
+  window.__pprobs = ppRows||[];
+  window.__locByPerson = {};
+  window.__locByClient = {};
+  RAW.jloc.forEach(j=>{
+    if(j.person_id) (window.__locByPerson[j.person_id]=window.__locByPerson[j.person_id]||[]).push(j);
+    if(j.client_id) (window.__locByClient[j.client_id]=window.__locByClient[j.client_id]||[]).push(j);
+  });
+  window.__kidsByParent = {};
+  RAW.jkids.forEach(k=>{ if(k.parent_key) (window.__kidsByParent[k.parent_key]=window.__kidsByParent[k.parent_key]||[]).push(k); });
+  window.__comByKey = {};
+  RAW.jcom.forEach(cm=>{ (window.__comByKey[cm.issue_key]=window.__comByKey[cm.issue_key]||[]).push(cm); });
   window.__audit = auditRows||[];
   window.__auditBy = {};
   (auditRows||[]).forEach(a=>{ if(a.person_id) (window.__auditBy[a.person_id]=window.__auditBy[a.person_id]||[]).push(a); });
@@ -602,6 +644,7 @@ function leadRow(l, extra){
     </div>
     <div class="detail">
       ${phead(l)}
+      ${locBlock(l)}
       <div class="left">
         <div class="acts">
           ${l.phone?`<a class="btn" href="https://wa.me/${l.phone.replace(/\D/g,"")}" target="_blank">💬 WhatsApp</a>`:""}
@@ -662,6 +705,153 @@ const ticketsOf = l => {
   return (window.__tickets||[]).filter(t=>(t.person_id && t.person_id===l.id) ||
     (t.customer_email && (t.customer_email===em || (alt && t.customer_email===alt))));
 };
+/* ---------- Jira mirror: locations, shipments, service tickets ---------- */
+/* locations of a person: linked directly, or through their Stripe client */
+function locsFor(l){
+  const direct=(window.__locByPerson||{})[l.id]||[];
+  const viaClient=l.client?((window.__locByClient||{})[l.client.id]||[]):[];
+  const seen=new Set(direct.map(x=>x.key));
+  return [...direct, ...viaClient.filter(x=>!seen.has(x.key))];
+}
+/* payment problems of a person, matched over every email we know for them */
+function ppOf(l){
+  const ems=[l.email,l.alt,l.client&&l.client.email].filter(Boolean).map(e=>e.toLowerCase());
+  return (window.__pprobs||[]).filter(p=>p.email&&ems.includes(p.email));
+}
+const jiraLink = key => ORG().jiraUrl ? `<a class="sflink" href="${esc(ORG().jiraUrl)}/browse/${esc(key)}" target="_blank" onclick="event.stopPropagation()">${esc(key)} ↗</a>` : esc(key);
+/* UPS wants the locale in the link; DACH customers get the German page */
+function upsLink(kid, loc){
+  const num=kid.tracking_number||((kid.tracking_link||"").match(/tracknum=([A-Z0-9]+)/i)||[])[1];
+  if(!num) return kid.tracking_link||null;
+  const dach=(loc&&loc.language)==="DE"||/^(\+49|\+43|\+41|0049|0043|0041)/.test((loc&&loc.phone||"").replace(/[\s-]/g,""));
+  return `https://www.ups.com/track?loc=${dach?"de_DE":"en_US"}&tracknum=${encodeURIComponent(num)}&requester=ST/trackdetails`;
+}
+const CLOSED_KID=/^(DELIVERED|CANCELED|LOST \/ RETURNED|RK_CLOSED|Done)$/i;
+const kidOpen=k=>!k.jira_resolved&&!CLOSED_KID.test(k.status||"");
+const dstr=d=>d?new Date(d+"T00:00:00").toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}):null;
+/* per-location detail is fetched on first expand: full child history + comments */
+window.jxOpen = async key => {
+  const s=window.__jx||(window.__jx={});
+  if(s[key]) return;
+  s[key]={loading:true};
+  try{
+    const [k1,c1]=await Promise.all([
+      sb.from("jira_children").select(JKID_SEL).eq("parent_key",key).order("jira_created",{ascending:false}).limit(100),
+      sb.from("jira_comments").select("*").eq("issue_key",key).order("at",{ascending:false}).limit(50),
+    ]);
+    (k1.data||[]).forEach(k=>upsertRows(RAW.jkids,[k],"key"));
+    s[key]={loaded:true, comments:c1.data||[]};
+    window.__kidsByParent={};
+    RAW.jkids.forEach(k=>{ if(k.parent_key) (window.__kidsByParent[k.parent_key]=window.__kidsByParent[k.parent_key]||[]).push(k); });
+    render(false);
+  }catch(e){ s[key]={error:String(e.message||e)}; }
+};
+/* the Locations block on a person card: one row per CS ticket, expandable */
+function locBlock(l){
+  const locs=locsFor(l);
+  if(!locs.length) return "";
+  const row=j=>{
+    const kids=((window.__kidsByParent||{})[j.key]||[]);
+    const ships=kids.filter(k=>k.project==="SH").sort((a,b)=>String(b.jira_created||"").localeCompare(String(a.jira_created||"")));
+    const svc=kids.filter(k=>k.project==="RK");
+    const openSvc=svc.filter(kidOpen).length;
+    const jx=(window.__jx||{})[j.key];
+    const coms=(jx&&jx.comments)||((window.__comByKey||{})[j.key]||[]);
+    const eq=[j.cubes?j.cubes+" cubes"+(j.cubes_version?" v"+j.cubes_version:""):null,
+      j.tablets?j.tablets+" tablets":null, j.ipads?j.ipads+" iPads":null,
+      j.watches?j.watches+" watches":null].filter(Boolean).join(" · ");
+    const prices=[["start",j.price_start],["now",j.price_now],["3m",j.price_3m],["6m",j.price_6m],["12m",j.price_12m]]
+      .filter(x=>x[1]!=null).map(x=>x[0]+" "+x[1]+"€").join(" · ");
+    const dates=[j.test_start?"test "+dstr(j.test_start)+" → "+(dstr(j.test_end)||"?"):null,
+      j.contract_renewal?"renewal "+dstr(j.contract_renewal):null,
+      j.contract_termination?"terminated "+dstr(j.contract_termination):null].filter(Boolean).join(" · ");
+    return `<details class="tbl" ontoggle="if(this.open)jxOpen('${j.key}')">
+      <summary>📍 ${esc(j.company||j.summary||j.key)} <span class="chip stage">${esc((j.phase||"").replace(/^CS_/,"").replace(/_/g," ").toLowerCase())}</span>
+        ${j.payment_problems?'<span class="chip" style="color:var(--crit)" title="Jira has the payment problems flag set">⚠ payment flag</span>':""}
+        ${openSvc?`<span class="chip">🔧 ${openSvc} open service</span>`:""}
+        <span class="meta">${jiraLink(j.key)}${j.client_number?" · client "+esc(j.client_number):""}</span></summary>
+      <div class="meta" style="padding:6px 2px;line-height:1.9">
+        ${j.contract_model?`Contract: <b>${esc(j.contract_model)}</b>${j.payment_rhythm?" · "+esc(j.payment_rhythm):""}${j.deposit?" · deposit "+j.deposit+"€":""}${j.mrr?" · MRR "+j.mrr+"€":""}<br>`:""}
+        ${prices?`Prices/cube: ${esc(prices)}<br>`:""}
+        ${dates?`${esc(dates)}<br>`:""}
+        ${eq?`Equipment: ${esc(eq)}<br>`:""}
+        ${j.manager_email?`Manager: ${esc(j.manager_name||"")} <span class="chip jump" onclick="copyTxt('${esc(j.manager_email)}','manager email')" title="Click to copy">✉ ${esc(j.manager_email)}</span>
+          ${j.sys_link?`<a class="sflink" href="${esc(j.sys_link)}" target="_blank">SYS ↗</a>`:""}<br>`:(j.sys_link?`<a class="sflink" href="${esc(j.sys_link)}" target="_blank">SYS ↗</a><br>`:"")}
+        ${ships.length?`Shipments:<br>${ships.map(k=>`&nbsp;&nbsp;📦 ${esc(k.summary||k.key)} · ${esc(k.status||"")}${k.date_shipment?" · shipped "+dstr(k.date_shipment):""}${k.date_receipt?" · received "+dstr(k.date_receipt):""}
+          ${upsLink(k,j)?`<a class="sflink" href="${esc(upsLink(k,j))}" target="_blank">${esc(k.delivery_service||"track")} ↗</a>`:""} ${jiraLink(k.key)}
+          ${k.questionnaire_sent&&!k.questionnaire_filled?`<span class="chip" style="color:var(--serious)">questionnaire not filled since ${dstr(k.questionnaire_sent)}</span>`:""}`).join("<br>")}<br>`:""}
+        ${svc.length?`Service: ${svc.filter(kidOpen).map(k=>`🔧 ${esc(k.summary||k.key)} · ${esc(k.status||"")} ${jiraLink(k.key)}`).join("<br>&nbsp;&nbsp;")||""}${openSvc&&svc.length>openSvc?"<br>&nbsp;&nbsp;":""}${svc.length>openSvc?`<span class="meta">${svc.length-openSvc} closed service tickets</span>`:""}<br>`:""}
+        ${jx&&jx.loading?'<span class="meta">loading history…</span>':""}
+        ${coms.length?`Comments (from Jira mails):<br>${coms.slice(0,6).map(cm=>`&nbsp;&nbsp;💬 <span class="meta">${esc(String(cm.at||"").slice(0,10))} ${esc(cm.author||"")}</span> ${esc((cm.body||"").slice(0,200))}`).join("<br>")}`:""}
+      </div></details>`;
+  };
+  return `<div style="width:100%" onclick="event.stopPropagation()" id="locs-${l.id}">
+    <div class="meta" style="margin:4px 0 2px">Locations (${locs.length})</div>${locs.map(row).join("")}</div>`;
+}
+/* ---------- Operations: ONE list of everything operationally open ----------
+   Each item: what, who, whose move it is, and how old. Computed fresh from the
+   Jira mirror + Stripe problems; nothing is stored twice. */
+function opsItems(){
+  const out=[], today=new Date();
+  const locByKey={}; RAW.jloc.forEach(j=>locByKey[j.key]=j);
+  const personLoc=j=>{
+    const who=j&&(j.contact_name||(j.summary||"").replace(/\s*\(.*$/,"")||"?");
+    return esc(who)+(j&&j.company?" · "+esc(j.company):"");
+  };
+  const dTo=d=>Math.round((new Date(d+"T00:00:00")-today)/86400000);
+  const dFrom=d=>d?Math.max(0,Math.round((today-new Date(String(d).slice(0,10)+"T00:00:00"))/86400000)):0;
+  for(const k of RAW.jkids){
+    const j=locByKey[k.parent_key];
+    if(k.project==="RK"&&kidOpen(k)){
+      out.push({kind:"service", icon:"🔧", our:true, age:dFrom(k.jira_created),
+        title:(k.summary||k.key)+" · "+(k.status||""), who:j?personLoc(j):esc(k.summary||k.key), key:k.key, loc:j});
+    }
+    if(k.project==="SH"&&kidOpen(k)){
+      out.push({kind:"shipment", icon:"📦", our:k.status==="DATA VALIDATION", age:dFrom(k.date_shipment||k.jira_created),
+        title:(k.status||"open")+(k.date_shipment?" · shipped "+dstr(k.date_shipment):""), who:j?personLoc(j):esc(k.summary||k.key), key:k.key, loc:j, kid:k});
+      if(k.questionnaire_sent&&!k.questionnaire_filled)
+        out.push({kind:"questionnaire", icon:"📋", our:dFrom(k.questionnaire_sent)>7, age:dFrom(k.questionnaire_sent),
+          title:"questionnaire sent "+dstr(k.questionnaire_sent)+", not filled", who:j?personLoc(j):esc(k.summary||k.key), key:k.key, loc:j});
+    }
+  }
+  for(const p of (window.__pprobs||[])){
+    out.push({kind:"payment", icon:"💳", our:true, age:dFrom(p.invoice_created),
+      title:Math.round((p.amount||0)/100)+"€ "+(p.status==="uncollectible"?"uncollectible":"unpaid")
+        +(p.attempts?" · "+p.attempts+" attempt"+(p.attempts>1?"s":""):"")
+        +(p.next_retry?" · retry "+new Date(p.next_retry).toLocaleDateString():"")
+        +(p.reason?" · "+p.reason.slice(0,80):""),
+      who:esc(p.name||p.email||"?"), email:p.email, pp:p});
+  }
+  const cliById={}; (window.__clients||[]).forEach(c=>cliById[c.id]=c);
+  for(const j of RAW.jloc){
+    if(j.test_end&&/TEST/i.test(j.phase||"")){
+      const d=dTo(j.test_end);
+      if(d<=60) out.push({kind:"test", icon:"🧪", our:d<=14, age:Math.max(0,-d),
+        title:"test period "+(d<0?"ended "+(-d)+"d ago":"ends in "+d+"d")+" ("+dstr(j.test_end)+")", who:personLoc(j), key:j.key, loc:j, due:d});
+    }
+    if(j.contract_renewal&&(j.phase||"")==="CS_CONTRACT"){
+      const d=dTo(j.contract_renewal);
+      if(d<=60&&d>=-30) out.push({kind:"renewal", icon:"🔄", our:d<=30, age:Math.max(0,-d),
+        title:"renewal "+(d<0?(-d)+"d overdue":"in "+d+"d")+" ("+dstr(j.contract_renewal)+")", who:personLoc(j), key:j.key, loc:j, due:d});
+    }
+    // consistency checks: the mirror lets us see what no single system shows
+    const cl=j.client_id?cliById[j.client_id]:null;
+    if(j.mrr&&cl&&cl.mrr!=null&&Math.abs(j.mrr-cl.mrr/100)>1)
+      out.push({kind:"check", icon:"⚖", our:true, age:0,
+        title:"Jira says "+j.mrr+"€ MRR, Stripe collects "+Math.round(cl.mrr/100)+"€", who:personLoc(j), key:j.key, loc:j});
+    if((j.phase||"")==="CS_CONTRACT"&&cl&&cl.last_paid_at&&dFrom(cl.last_paid_at)>60)
+      out.push({kind:"check", icon:"⚖", our:true, age:dFrom(cl.last_paid_at),
+        title:"active contract, last payment "+dFrom(cl.last_paid_at)+"d ago", who:personLoc(j), key:j.key, loc:j});
+    const hasPP=(window.__pprobs||[]).some(p=>p.email&&[j.contact_email,j.manager_email,cl&&cl.email].filter(Boolean).map(e=>e.toLowerCase()).includes(p.email));
+    if(j.payment_problems===true&&!hasPP)
+      out.push({kind:"check", icon:"⚖", our:false, age:0,
+        title:"Jira payment-problems flag is set but Stripe shows nothing failing (flag may be stale)", who:personLoc(j), key:j.key, loc:j});
+    if(j.payment_problems===false&&hasPP)
+      out.push({kind:"check", icon:"⚖", our:true, age:0,
+        title:"Stripe shows failing payments but the Jira flag is off", who:personLoc(j), key:j.key, loc:j});
+  }
+  return out;
+}
 /* lifecycle: client (paid), lead (came in via sales), support-only (only ever wrote to support) */
 function lifecycleOf(l){
   if(l.client) return "client";
@@ -682,6 +872,8 @@ function phead(l){
     ${window.CANW!==false?`<span class="chip jump" onclick="newTicket('${l.id}')" title="Open a support ticket for this person">🎫 ＋ ticket</span>
     <span class="chip jump coupon" onclick="newCoupon('${l.id}')" title="Issue a discount code through the admin panel">🎟 ＋ coupon</span>`:""}
     ${l.client?`<span class="chip jump life-client" onclick="jumpSearch('clients','${esc(l.client.email||l.email||l.name)}')" title="Open in Clients">💰 ${esc(eur(l.client.total_paid,l.client.currency))} · ${l.client.payments}× paid →</span>`:""}
+    ${locsFor(l).length?`<span class="chip jump" onclick="document.getElementById('locs-${l.id}')?.scrollIntoView({behavior:'smooth'})" title="Contracts, shipments and service from Jira">📍 ${locsFor(l).length} location${locsFor(l).length>1?"s":""}</span>`:""}
+    ${ppOf(l).length?`<span class="chip jump" style="color:var(--crit)" onclick="go('ops');window.__OPS={kind:'payment'}" title="${esc(ppOf(l).map(p=>Math.round(p.amount/100)+"€ · "+(p.reason||p.status)).join(" · "))}">⚠ ${ppOf(l).length} failed payment${ppOf(l).length>1?"s":""} →</span>`:""}
     ${l.coupons.length?`<span class="chip jump coupon" onclick="jumpSearch('coupons','${esc(l.email||l.name)}')" title="Open in Coupons">🎟 ${actC} active · ${l.coupons.length} issued →</span>`:""}
     ${l.hub||l.stage?`<span class="chip stage">${esc(l.hub||l.stage)}</span>`:""}
     ${l.due&&day(l.due)&&day(l.due)>TODAY?`<span class="chip" title="Personal reminder set">⏰ ${day(l.due).toLocaleDateString(undefined,{day:"numeric",month:"short"})}</span>`:""}
@@ -1318,7 +1510,8 @@ const PANELS = {
         ["Coupons (admin panel)", "admin_panel", "pulls all discounts and creates the ones requested here"],
         ["Email", "email", "auto-sorting: support@ → tickets, team@/hello@ → leads, known senders → touches"],
         ["Stripe", "stripe", "paying clients and revenue for the Clients tab"],
-        ["Placetel (calls)", "placetel", "calls auto-log through the Notify API; the CSV import stays as a cross-check"]
+        ["Placetel (calls)", "placetel", "calls auto-log through the Notify API; the CSV import stays as a cross-check"],
+        ["Jira (read-only mirror)", "jira", "contracts, shipments and service tickets per location; the hub never writes to Jira"]
       ];
       const row = ([name, key, note]) => {
         const s=srcHealth(key);
@@ -1454,6 +1647,7 @@ const PANELS = {
           <span class="chip" style="cursor:${window.CANW!==false?'pointer':'default'}" title="Detected from the first message body. Wrong? Click to flip DE/EN." onclick="${window.CANW!==false?`langFlip(${t.id});event.stopPropagation()`:''}">${t.language==="de"?"🇩🇪 DE":"🇬🇧 EN"}</span>
           ${msgs.length?`<span class="badge-t">${msgs.length}✉</span>`:""}
           ${lead?`<span class="chip stage" title="Also a sales lead">lead ✦</span>`:""}
+          ${lead&&locsFor(lead).some(j=>((window.__kidsByParent||{})[j.key]||[]).some(k=>k.project==="RK"&&kidOpen(k)))?`<span class="chip jump" onclick="go('ops');window.__OPS={kind:'service'};event.stopPropagation()" title="This customer also has an open service ticket in Jira">🔧 Jira service →</span>`:""}
           ${(t.assignees||[]).length?`<span class="chip asg" title="Assigned to ${esc((t.assignees||[]).join(", "))}">👤 ${(t.assignees||[]).map(a=>esc(String(a).split("@")[0])).join(" + ")}</span>`:""}
           ${window.CANW!==false?`<select class="st" onchange="assignT(${t.id},this.value);this.selectedIndex=0" onclick="event.stopPropagation()" title="Assign or unassign (picking an assigned person removes them)">
             <option value="">👤 Assign…</option>
@@ -1497,6 +1691,37 @@ const PANELS = {
       <h2>Recently resolved</h2>${res.map(row).join("")||'<div class="empty">None yet</div>'}
       <details class="tbl" ${junked.length?"":"style='display:none'"}><summary>🗑 Junked (${junked.length}): hidden threads, restore or delete forever</summary>
       ${junked.map(jrow).join("")||'<div class="meta" style="padding:8px">Nothing junked</div>'}</details>`;
+    }
+  },
+  ops: {
+    title:"Operations", count:()=>{ try{ return opsItems().filter(i=>i.our).length||""; }catch(e){ return "!"; } },
+    render(){
+      const O=window.__OPS||(window.__OPS={kind:"all"});
+      const all=opsItems();
+      const KINDS=[["all","Everything"],["payment","💳 Payments"],["service","🔧 Service"],["shipment","📦 Shipments"],
+        ["questionnaire","📋 Questionnaires"],["test","🧪 Test periods"],["renewal","🔄 Renewals"],["check","⚖ Checks"]];
+      const cnt=k=>k==="all"?all.length:all.filter(i=>i.kind===k).length;
+      const arr=(O.kind==="all"?all:all.filter(i=>i.kind===O.kind)).sort((a,b)=>b.age-a.age);
+      const q=(document.getElementById("q").value||"").toLowerCase().trim();
+      const shown=q?arr.filter(i=>(i.who+" "+i.title+" "+(i.key||"")+" "+(i.email||"")).toLowerCase().includes(q)):arr;
+      const ours=shown.filter(i=>i.our), theirs=shown.filter(i=>!i.our);
+      const row=i=>{
+        const person=i.loc&&i.loc.person_id&&byId[i.loc.person_id];
+        const openAct=person?`openPerson('${person.id}')`:(i.email?`jumpSearch('people','${esc(i.email)}')`:"");
+        return `<div class="card"><div class="row" ${openAct?`onclick="${openAct}"`:'style="cursor:default"'}>
+          <div class="who"><span class="nm">${i.icon} ${i.who}</span><div class="co">${esc(i.title)}</div></div>
+          ${i.key?`<span class="chip">${jiraLink(i.key)}</span>`:""}
+          ${i.kid&&upsLink(i.kid,i.loc)?`<a class="chip jump" href="${esc(upsLink(i.kid,i.loc))}" target="_blank" onclick="event.stopPropagation()">📦 track ↗</a>`:""}
+          ${i.pp?`<button class="btn" onclick="copyTxt('${esc(i.email||"")}','email');event.stopPropagation()" title="Copy email">📋 ✉</button>`:""}
+          <span class="meta ${i.age>=14?'quiet':''}">${i.age?i.age+"d old":(i.due!=null&&i.due>0?"in "+i.due+"d":"now")}</span>
+        </div></div>`;
+      };
+      return `<p class="hint">Everything operationally open across all clients, in one place: read straight from Jira and Stripe, updated by the sync, nothing editable here. "Our move" needs someone on our side to act; the folded list waits on customers, carriers or banks. Amounts unpaid: ${Math.round((window.__pprobs||[]).reduce((a,p)=>a+(p.amount||0),0)/100).toLocaleString()}€.</p>
+      <div class="filters">${KINDS.map(([k,lb])=>`<button class="fbtn ${O.kind===k?'active':''}" onclick="window.__OPS.kind='${k}';render()">${lb} ${cnt(k)?"("+cnt(k)+")":""}</button>`).join("")}</div>
+      <h2>Our move (${ours.length})</h2>
+      ${ours.map(row).join("")||'<div class="empty">Nothing waiting on us 🎉</div>'}
+      <details class="tbl"><summary>⏳ Waiting on others (${theirs.length}): customers, carriers, banks</summary>
+      ${theirs.map(row).join("")||'<div class="meta" style="padding:8px">Nothing</div>'}</details>`;
     }
   },
   people: {
@@ -1585,7 +1810,7 @@ const PANELS = {
 window.setPF = f => { window.__PF=f; render(false); };
 
 /* ---------- users admin (settings, admins only) ---------- */
-const TABKEYS=["today","fresh","followups","coupons","funnel","clients","support","people","trays"];
+const TABKEYS=["today","fresh","followups","coupons","funnel","clients","support","ops","people","trays"];
 function usersAdmin(){
   const users=window.__users||[];
   const urow=u=>{ const isMe=u.email===ME; const dis=isMe?"disabled":"";
@@ -2276,7 +2501,7 @@ function srcHealth(key){
   return {state:"ok", last, msg:""};
 }
 function healthProblems(){
-  return [["Salesforce","salesforce"],["Coupons","admin_panel"],["Email","email"],["Stripe","stripe"],["Placetel","placetel"]]
+  return [["Salesforce","salesforce"],["Coupons","admin_panel"],["Email","email"],["Stripe","stripe"],["Placetel","placetel"],["Jira","jira"]]
     .map(([n,k])=>({n, ...srcHealth(k)})).filter(x=>x.state!=="ok");
 }
 
