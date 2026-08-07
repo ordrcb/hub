@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OrderCube Hub</title>
+<title>Hub</title>
 <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
 <style>
 :root{
@@ -180,7 +180,7 @@ details.snip .body{margin:4px 0;padding:6px 8px;background:var(--chipbg);border-
 <body>
 <div id="login">
   <form class="logincard" onsubmit="doLogin(event)">
-    <h1>OrderCube Hub</h1>
+    <h1>Hub</h1>
     <input class="li" type="email" id="lemail" placeholder="Email" autocomplete="username" required>
     <input class="li" type="password" id="lpass" placeholder="Password" autocomplete="current-password" required>
     <button class="btn primary" type="submit">Sign in</button>
@@ -207,6 +207,9 @@ details.snip .body{margin:4px 0;padding:6px 8px;background:var(--chipbg);border-
 const SUPA_URL = "https://yrrknwsfqenugtdtbvhw.supabase.co";
 const SUPA_KEY = "sb_publishable_vGhjGB0Lx9VpExWWW_UdRQ_CzTiYmUO";
 const sb = supabase.createClient(SUPA_URL, SUPA_KEY);
+/* an invitation or recovery link lands with a token in the URL hash; remember
+   what kind it was before the auth client consumes it */
+const BOOTHASH = location.hash || "";
 let ME = null;
 let LEADS = [], byId = {}, STATS = {};
 
@@ -374,13 +377,18 @@ function derive(l){
   l.planned = [laD && laD>TODAY ? laD : null, futureMeet, dueD && dueD>TODAY ? dueD : null]
     .filter(Boolean).sort((a,b)=>a-b)[0] || null;
   l.lastPast = [laD && laD<=TODAY ? laD : null, ...past].filter(Boolean).sort((a,b)=>b-a)[0] || null;
-  l.hot = l.logs.some(g=>{
-    if(g.kind==="meeting" && !/CANCELED/.test(g.detail||"")) return true;
-    if(g.kind!=="call") return false;
-    const det=g.detail||"";
-    if(/\d+h\s/.test(det)) return true;
-    const m=det.match(/(\d+)m\s/); return m && +m[1]>=2;
-  });
+  /* honest temperature: a "real conversation" is a meeting that happened or a
+     2+ minute call. 🔥 only while one happened in the last 30 days; 💎 marks
+     "was warm": 2+ real conversations ever, but none in the last 30 days. */
+  const isConvDet = det => /\d+h\s/.test(det||"") || (+(((det||"").match(/(\d+)m\s/)||[])[1])>=2);
+  const convDays = l.logs.filter(g=>
+      (g.kind==="meeting" && !/CANCELED/.test(g.detail||"")) ||
+      (g.kind==="call" && isConvDet(g.detail)))
+    .map(g=>day(String(g.at).slice(0,10))).filter(d=>d && d<=TODAY);
+  l.convs = convDays.length;
+  l.lastConv = convDays.sort((a,b)=>b-a)[0] || null;
+  l.hot = !!(l.lastConv && daysAgo(l.lastConv)<=30);
+  l.warm = !l.hot && l.convs>=2;
   l.stage = l.hub ? HUB2STAGE[l.hub] : (STAGE[l.sf]||"New");
   if(l.client) l.stage = "Won";              // paying client = converted, leaves all chase lists
   l.touches = (l.sfTouches||0) + l.logs.length;
@@ -450,10 +458,12 @@ async function loadData(delta){
     canDelta ? sb.from("jira_comments").select("*").gt("id", RAW.mark.jcom||0).order("id").limit(300)
              : sb.from("jira_comments").select("*").order("id",{ascending:false}).limit(300),
     sb.from("ops_hidden").select("*"),
+    sb.from("reminders").select("*").is("done_at",null).order("due").limit(300),
   ]);
   const [{data:statRows, error:e3},{data:runRows},{data:ticketRows},{data:userRows},
          {data:umailRows},{data:ucallRows},{data:creqRows},{data:mbRows},{data:auditRows},
-         {data:jlocRows},{data:jkidRows},{data:ppRows},{data:jcomRows},{data:ohRows}] = small;
+         {data:jlocRows},{data:jkidRows},{data:ppRows},{data:jcomRows},{data:ohRows},{data:remRows}] = small;
+  window.__rems = remRows||window.__rems||[];
 
   let e1=null, e2=null, e4=null;
   if(!canDelta){
@@ -507,6 +517,9 @@ async function loadData(delta){
   window.__trayMail = umailRows||[];
   window.__trayCalls = ucallRows||[];
   window.__couponReqs = creqRows||[];
+  // who issued which coupon (groundwork for a future referral-partner role)
+  window.__couponBy = {};
+  (creqRows||[]).forEach(r=>{ if(r.code&&r.requested_by) window.__couponBy[r.code]=String(r.requested_by).split("@")[0]; });
   window.__mailboxes = mbRows||[];
   // Jira mirror merge (additive, same rules as the big tables)
   if(canDelta){
@@ -649,7 +662,10 @@ function leadRow(l, extra){
   const c = callable(l);
   const tz = c ? `<span class="tz ${c.ok?'ok':'no'}"><span class="dot"></span>${c.cc} ${String(c.h).padStart(2,"0")}:00</span>` : "";
   const chips = [
-    l.hot?'<span class="chip" title="Real conversation (2+ min call) or meeting happened" style="background:color-mix(in srgb,var(--crit) 14%,var(--surface))">🔥</span>':"",
+    l.hot?'<span class="chip" title="Real conversation (2+ min call or meeting) within the last 30 days" style="background:color-mix(in srgb,var(--crit) 14%,var(--surface))">🔥</span>':"",
+    l.warm?'<span class="chip" title="Was warm: 2+ real conversations, but none in the last 30 days">💎</span>':"",
+    (typeof fuGaveUp==="function"&&fuGaveUp(l))?'<span class="chip" title="Many attempts, never a real answer (give-up rule). Any new touch or real connect revives them.">👻</span>':"",
+    l.due&&day(l.due)&&day(l.due)>TODAY?`<span class="chip" title="Personal reminder set: resurfaces then">⏰ ${day(l.due).toLocaleDateString(undefined,{day:"numeric",month:"short"})}</span>`:"",
     l.client?`<span class="chip coupon" title="Paying client · ${esc(eur(l.client.total_paid,l.client.currency))}">💰 client</span>`:"",
     l.cp?`<span class="chip coupon ${l.cp.offer?"jump":""}" title="${esc(l.cp.code)}${l.cp.offer?" · click to copy the offer link":""}" ${l.cp.offer?`onclick="copyTxt('${esc(l.cp.offer)}','offer link');event.stopPropagation()"`:""}>🎟 ${esc(l.cp.val)}${l.cp.offer?" 🔗":""}</span>`
       :(l.coupon?'<span class="chip coupon">Coupon</span>':(/Book a Call/i.test(l.src)?'<span class="chip call">Book-a-call</span>':"")),
@@ -657,7 +673,7 @@ function leadRow(l, extra){
       :(window.CANW!==false&&terrOwner(l.cc)?`<span class="chip jump" onclick="assignLead('${l.id}','${esc(terrOwner(l.cc))}');event.stopPropagation()" title="${esc(l.cc)} is in this person's territory. One click assigns; nothing happens by itself.">👤 suggest: ${esc(String(terrOwner(l.cc)).split("@")[0])}</span>`:""),
     `<span class="chip stage">${esc(l.hub||(l.attempted?"No answer yet":l.stage))}</span>`
   ].join("");
-  return `<div class="card" data-id="${l.id}">
+  return `<div class="card" data-id="${l.id}"${extra&&extra.dim?' style="opacity:.55"':''}>
     <div class="row" onclick="toggle('${l.id}')">
       ${window.__SEL&&window.__SEL.on?`<input type="checkbox" ${window.__SEL.ids.has(l.id)?"checked":""} onclick="selToggle('${l.id}');event.stopPropagation()" style="width:16px;height:16px;flex:none;cursor:pointer">`:""}
       <div class="who"><span class="nm">${esc(l.name)}</span>${l.internal?' <span class="chip">internal</span>':""}
@@ -807,7 +823,8 @@ function locBlock(l){
       <summary>📍 ${esc(j.company||j.summary||j.key)} <span class="chip stage">${esc((j.phase||"").replace(/^CS_/,"").replace(/_/g," ").toLowerCase())}</span>
         ${j.payment_problems?'<span class="chip" style="color:var(--crit)" title="Jira has the payment problems flag set">⚠ payment flag</span>':""}
         ${openSvc?`<span class="chip">🔧 ${openSvc} open service</span>`:""}
-        <span class="meta">${jiraLink(j.key)}${j.client_number?" · client "+esc(j.client_number):""}</span></summary>
+        <span class="meta">${jiraLink(j.key)}${j.client_number?" · client "+esc(j.client_number):""}</span>
+        ${(sysLink(j.manager_email)||j.sys_link)?`<a class="sflink" href="${esc(sysLink(j.manager_email)||j.sys_link)}" target="_blank" title="Open this customer team in SYS" onclick="event.stopPropagation()">SYS ↗</a>`:""}</summary>
       <div class="meta" style="padding:6px 2px;line-height:1.9">
         ${j.contract_model?`Contract: <b>${esc(j.contract_model)}</b>${j.payment_rhythm?" · "+esc(j.payment_rhythm):""}${j.deposit?" · deposit "+j.deposit+"€":""}${j.mrr?" · MRR "+j.mrr+"€":""}<br>`:""}
         ${prices?`Prices/cube: ${esc(prices)}<br>`:""}
@@ -1013,7 +1030,8 @@ function timeline(l){
       snip:g.kind==="email"?(g.snippet||null):null,
       del:(g.id && (g.kind==="wa" || (g.kind==="call" && !imported(g))))?g.id:null})),
     ...l.coupons.map(cp=>({d:String(cp.issued||"").slice(0,10), i:"🎟",
-      t:"Coupon "+cp.code+" ("+cp.val+")"+(cp.redeemed?" · redeemed 🎉":(cp.exp?(cp.active?" · expires "+cp.exp.toLocaleDateString():" · expired"):""))})),
+      t:"Coupon "+cp.code+" ("+cp.val+")"+(cp.redeemed?" · redeemed 🎉":(cp.exp?(cp.active?" · expires "+cp.exp.toLocaleDateString():" · expired"):""))
+        +((window.__couponBy||{})[cp.code]?" · by "+(window.__couponBy||{})[cp.code]:"")})),
     ...tks.map(t=>({d:String(t.opened_at).slice(0,10), i:"🎫",
       t:"Support: "+(t.subject||"")+" · "+String(t.state).replace(/_/g," ")})),
     ...(window.PROFILE&&PROFILE.role==="admin"?((window.__auditBy||{})[l.id]||[]):[]).map(a=>({d:String(a.at).slice(0,10), i:"✏️",
@@ -1345,7 +1363,7 @@ const hubAlert=(title,body)=>hubDialog({title,body,noCancel:true});
 window.vcf = id => {
   const l=byId[id];
   const card=["BEGIN:VCARD","VERSION:3.0","FN:"+(l.co? l.name+" ("+l.co+")":l.name),
-    l.co?"ORG:"+l.co:"","TEL;TYPE=CELL:"+(l.phone||""),"EMAIL:"+(l.email||""),"NOTE:OrderCube lead","END:VCARD"]
+    l.co?"ORG:"+l.co:"","TEL;TYPE=CELL:"+(l.phone||""),"EMAIL:"+(l.email||""),"NOTE:"+(ORG().brand||"Hub")+" lead","END:VCARD"]
     .filter(Boolean).join("\r\n");
   const a=document.createElement("a");
   a.href=URL.createObjectURL(new Blob([card],{type:"text/vcard"}));
@@ -1353,11 +1371,11 @@ window.vcf = id => {
 };
 window.vcfAll = () => {
   const cards=applyView(newLeads()).filter(l=>l.phone).map(l=>["BEGIN:VCARD","VERSION:3.0",
-    "FN:"+(l.co? l.name+" ("+l.co+")":l.name)+" [OC lead]",l.co?"ORG:"+l.co:"","TEL;TYPE=CELL:"+l.phone,
+    "FN:"+(l.co? l.name+" ("+l.co+")":l.name)+" [lead]",l.co?"ORG:"+l.co:"","TEL;TYPE=CELL:"+l.phone,
     "EMAIL:"+(l.email||""),"END:VCARD"].filter(Boolean).join("\r\n")).join("\r\n");
   const a=document.createElement("a");
   a.href=URL.createObjectURL(new Blob([cards],{type:"text/vcard"}));
-  a.download="ordercube_new_leads.vcf"; a.click();
+  a.download="new_leads.vcf"; a.click();
 };
 
 /* ---------- pools ---------- */
@@ -1426,6 +1444,11 @@ function sortArr(arr){
 const sortSel = () => `<select class="st" onchange="setSort(this.value)" title="Sort order">
   ${[["recent","Sort: recent touch"],["newest","Sort: created newest"],["oldest","Sort: created oldest"],["touches","Sort: most touches"],["hot","Sort: 🔥 first"]]
     .map(([v,l2])=>`<option value="${v}" ${window.SORT===v?"selected":""}>${l2}</option>`).join("")}</select>`;
+/* per-tab sort orders (Operations, Clients, Support, People keep their own) */
+window.__SORTX = window.__SORTX||{};
+window.setSortX = (tab,v) => { window.__SORTX[tab]=v; render(false); };
+const sortSelX = (tab,opts,dflt) => `<select class="st" onchange="setSortX('${tab}',this.value)" title="Sort order">
+  ${opts.map(([v,l2])=>`<option value="${v}" ${((window.__SORTX||{})[tab]||dflt)===v?"selected":""}>${l2}</option>`).join("")}</select>`;
 const applyQ = arr => {
   const v = applyView(arr);
   const q=(document.getElementById("q").value||"").toLowerCase().trim();
@@ -1446,13 +1469,17 @@ const PANELS = {
         <div class="tile click" onclick="go('fresh')"><div class="v">${applyQ(newLeads()).length}</div><div class="l">Untouched leads</div><div class="s">zero activity so far</div></div>
       </div>
       <h2 id="sec-cexp">Coupons expiring soon (${cexp.length})</h2>
-      ${list(cexp, l=>({txt:expTxt(l.cp), cls: daysTo(l.cp.exp)<=3?"due":"quiet"}))}
+      ${list(cexp, l=> (l.lastPast&&daysAgo(l.lastPast)===0)
+        ? {txt:"✓ called today · "+expTxt(l.cp), dim:true}
+        : {txt:expTxt(l.cp), cls: daysTo(l.cp.exp)<=3?"due":"quiet"})}
       <h2 id="sec-due">Due follow-ups (${due.length})</h2>
       ${list(due, l=>l.planned?{txt:"due "+l.planned.toLocaleDateString(undefined,{day:"numeric",month:"short"}),cls:"due"}:{txt:l.quiet+"d silent",cls:"quiet"})}
       <h2 id="sec-quiet">Gone quiet, ${CAD().quiet}+ days (${quiet.length})</h2>
       ${list(quiet, l=>({txt:l.quiet+"d silent",cls:"quiet"}))}
       <h2>Scheduled ahead (${plan.length})</h2>
-      ${list(plan, l=>({txt:"due "+l.planned.toLocaleDateString(undefined,{day:"numeric",month:"short"})}))}
+      ${list(plan, l=> (l.lastPast&&daysAgo(l.lastPast)===0)
+        ? {txt:"✓ called today · due "+l.planned.toLocaleDateString(undefined,{day:"numeric",month:"short"}), dim:true}
+        : {txt:"due "+l.planned.toLocaleDateString(undefined,{day:"numeric",month:"short"})})}
       <h2>The last seven days</h2>
       ${(()=>{ const w=weekStats(); const names=Object.keys(w.per).sort();
         return `<p class="hint">What was actually done since ${w.since.toLocaleDateString(undefined,{day:"numeric",month:"short"})}: real activity, not statuses. The funnel shows where leads stand; this shows what the team did.</p>
@@ -1460,12 +1487,12 @@ const PANELS = {
           <div class="tile"><div class="v">${Object.values(w.per).reduce((a,x)=>a+x.conv,0)}</div><div class="l">Real conversations</div><div class="s">2+ minutes, the number that matters</div></div>
           <div class="tile"><div class="v">${Object.values(w.per).reduce((a,x)=>a+x.attempts,0)}</div><div class="l">Call attempts</div><div class="s">${Object.values(w.per).reduce((a,x)=>a+x.answered,0)} answered at all</div></div>
           <div class="tile"><div class="v">${w.newLeads}</div><div class="l">New people arrived</div></div>
-          <div class="tile"><div class="v">${Object.values(w.per).reduce((a,x)=>a+x.emails+x.wa,0)}</div><div class="l">Emails and WhatsApp</div></div>
+          <div class="tile"><div class="v">${Object.values(w.per).reduce((a,x)=>a+x.emails+x.wa,0)}</div><div class="l">Emails + WA sent</div><div class="s">${w.repliesIn} replies received from leads</div></div>
           <div class="tile"><div class="v">${w.tickets}</div><div class="l">Support tickets opened</div></div>
           <div class="tile"><div class="v">${w.won}</div><div class="l">Became clients</div></div>
         </div>
         ${names.length?`<details class="tbl" open><summary>Per person</summary><table>
-          <tr><th>Person</th><th>Attempts</th><th>Answered</th><th>Conversations 2m+</th><th>WhatsApp</th><th>Emails</th><th>Meetings</th><th>Notes</th></tr>
+          <tr><th>Person</th><th>Attempts</th><th>Answered</th><th>Conversations 2m+</th><th>WhatsApp</th><th>Emails sent</th><th>Meetings</th><th>Notes</th></tr>
           ${names.map(n=>{const p=w.per[n];return `<tr><td>${esc(n)}</td><td>${p.attempts}</td><td>${p.answered}</td><td><b>${p.conv}</b></td><td>${p.wa}</td><td>${p.emails}</td><td>${p.meetings}</td><td>${p.notes}</td></tr>`;}).join("")}
         </table></details>`:""}`; })()}`;
     }
@@ -1482,8 +1509,12 @@ const PANELS = {
       ${selBar([...arr,...att].map(l=>l.id))}
       <h2>Untouched (${arr.length})</h2>
       ${list(sortArr(arr), l=>({txt:daysAgo(l.created)===0?"today":daysAgo(l.created)+"d old"}))}
-      <h2>Attempted, no answer yet (${att.length})</h2>
-      ${list(sortArr(att))}`;
+      ${(()=>{ /* a future reminder or meeting parks the lead until its date */
+        const sched=att.filter(l=>fuScheduled(l)); att=att.filter(l=>!fuScheduled(l));
+        return `<h2>Attempted, no answer yet (${att.length})</h2>
+      ${list(sortArr(att))}
+      <details class="tbl" ${sched.length?"":"style='display:none'"}><summary>📅 Scheduled ahead (${sched.length}): reminder or meeting set, back on their date</summary>
+      ${sched.sort((a,b)=>a.planned-b.planned).map(l=>leadRow(l,{txt:"due "+l.planned.toLocaleDateString(undefined,{day:"numeric",month:"short"})})).join("")}</details>`; })()}`;
     }
   },
   followups: {
@@ -1499,7 +1530,7 @@ const PANELS = {
       const due=fuDue(arr), snoozed=arr.filter(fuSnoozed), sched=arr.filter(l=>!fuSnoozed(l)&&fuScheduled(l)),
             gaveup=arr.filter(l=>!fuSnoozed(l)&&!fuScheduled(l)&&fuGaveUp(l));
       const backIn=l=>{ const n=CAD().resurface-daysAgo(l.lastPast); return (l.quiet===0?"✓ touched today":"touched "+l.quiet+"d ago")+" · back in "+n+"d"; };
-      return `<p class="hint">The work queue: everyone with any activity whose turn it is again. A call, WA or email today snoozes them; they come back automatically after ${CAD().resurface} days (change the rhythm in Settings → My cadence). Snoozed and scheduled people are in the folded lists below, nothing is lost. ✦ = touches this year, 🔥 = real conversation or meeting.</p>
+      return `<p class="hint">The work queue: everyone with any activity whose turn it is again. A call, WA or email today snoozes them; they come back automatically after ${CAD().resurface} days (change the rhythm in Settings → My cadence). Snoozed and scheduled people are in the folded lists below, nothing is lost. ✦ = touches this year, 🔥 = real conversation in the last 30 days, 💎 = was warm earlier, 👻 = many attempts, never answered.</p>
       <div class="filters">${fb("all","All")}${fb("mine","👤 Mine")}${fb("unassigned","Unassigned")}${fb("lt5","Under 5 touches")}${fb("coupon","Coupon requesters")}${fb("noanswer","No answer yet")}${selBtn()}${sortSel()}</div>
       ${selBar(due.map(l=>l.id))}
       <h2>Due now (${due.length})</h2>
@@ -1525,7 +1556,7 @@ const PANELS = {
       ${window.CANW!==false?`<div class="filters"><button class="fbtn" onclick="newCoupon()">＋ Create coupon</button>
         ${pend.length?`<span class="chip" title="Waiting for the next sync run, or press Sync now">⏳ ${pend.length} being created</span>`:""}
         ${failed.length?`<span class="chip" style="color:var(--crit)" title="${esc(failed.map(f=>f.email+": "+(f.error||"")).join(" · "))}">✗ ${failed.length} failed</span>`:""}</div>`:""}
-      ${list(arr, l=> l.cp ? {txt:expTxt(l.cp), cls: daysTo(l.cp.exp)<=3?"due":""}
+      ${list(arr, l=> l.cp ? {txt:expTxt(l.cp)+((window.__couponBy||{})[l.cp.code]?" · by "+(window.__couponBy||{})[l.cp.code]:""), cls: daysTo(l.cp.exp)<=3?"due":""}
         : {txt: l.coupons.length ? (l.coupons.some(x=>x.redeemed)?"redeemed 🎉":"expired") : "requested, none issued"})}`;
     }
   },
@@ -1609,6 +1640,10 @@ const PANELS = {
         && set.has(ccOf(cl))
         && (!rbC || (cl.first_paid_at && (!rbC.from || new Date(cl.first_paid_at)>=rbC.from)
                                       && (!rbC.to || new Date(cl.first_paid_at)<=rbC.to))));
+      const soC=(window.__SORTX||{}).clients||"total";
+      cs.sort(soC==="mrr"?(a,b)=>(b.mrr||0)-(a.mrr||0)
+        :soC==="last"?(a,b)=>String(b.last_paid_at||"").localeCompare(String(a.last_paid_at||""))
+        :(a,b)=>(b.total_paid||0)-(a.total_paid||0));
       const totalRev=cs.reduce((a,c)=>a+(c.total_paid||0),0);
       const firsts=cs.map(c=>c.first_paid_at).filter(Boolean).map(d=>new Date(d));
       const monthsActive=Math.max(1,firsts.length?Math.round((Date.now()-Math.min(...firsts))/2592000000):1);
@@ -1622,6 +1657,7 @@ const PANELS = {
         <div class="tile"><div class="v">${eur(monthly)}</div><div class="l">Monthly run-rate</div></div>
         <div class="tile"><div class="v">${eur(monthly*12)}</div><div class="l">Projected 12 months</div></div>
       </div>
+      <div class="filters">${sortSelX("clients",[["total","Sort: total paid"],["mrr","Sort: MRR"],["last","Sort: last payment"]],"total")}</div>
       ${cs.map(cl=>{
         const lead = (cl.person_id&&byId[cl.person_id]) || null;
         const last = cl.last_paid_at? daysAgo(new Date(String(cl.last_paid_at).slice(0,10)+"T00:00:00")) : null;
@@ -1739,9 +1775,9 @@ const PANELS = {
       <h2>AI assistants</h2>
       <p class="hint">Any assistant that speaks MCP (Claude Desktop, Claude Code, Cursor, LM Studio, or a local Ollama model through Open WebUI) can search this hub: who is this number, what happened with this person, what is due today, what support is waiting. It runs on your own computer, listens on no network port, and uses a read-only login, so nothing can be changed through it. Full instructions: docs/connect-assistant.md in the project folder.</p>
       <div class="card"><div class="detail" style="display:flex;border-top:0;flex-direction:column">
-        <div class="meta">Where the hub folder sits <b>on the computer you are setting up</b> (Windows: D:\\OrderCubeHub · Mac/Linux: /Users/you/OrderCubeHub):</div>
+        <div class="meta">Where the hub folder sits <b>on the computer you are setting up</b> (Windows: D:\\Hub · Mac/Linux: /Users/you/Hub):</div>
         <div class="acts">
-          <input class="li" id="mcp-path" style="flex:1;min-width:240px" value="${esc(localStorage.getItem("hub_mcp_path")||"D:\\OrderCubeHub")}" oninput="mcpPath()">
+          <input class="li" id="mcp-path" style="flex:1;min-width:240px" value="${esc(localStorage.getItem("hub_mcp_path")||ORG().mcpFolder||"D:\\Hub")}" oninput="mcpPath()">
           <span class="meta" id="mcp-os"></span>
         </div>
         <div class="meta" style="margin-top:6px">Claude Desktop: Settings → Developer → Edit Config, paste this:</div>
@@ -1773,7 +1809,9 @@ const PANELS = {
         return true;
       };
       const sf=(k,v,lb)=>`<button class="fbtn ${String(S[k])===String(v)?'active':''}" onclick="supF('${k}','${v}')">${lb}</button>`;
-      const byAct=(a,b)=>new Date(b.last_activity_at)-new Date(a.last_activity_at);
+      const soS=(window.__SORTX||{}).support||"recent";
+      const byAct=(a,b)=> soS==="silent" ? new Date(a.last_activity_at)-new Date(b.last_activity_at)
+                                         : new Date(b.last_activity_at)-new Date(a.last_activity_at);
       const open=ts.filter(t=>["new","waiting_us"].includes(t.state)&&f(t)).sort(byAct);
       const wait=ts.filter(t=>t.state==="waiting_customer"&&f(t)).sort(byAct);
       const res=ts.filter(t=>t.state==="resolved"&&f(t)).sort(byAct).slice(0,15);
@@ -1813,13 +1851,14 @@ const PANELS = {
         </div>
         <div class="detail" style="display:${isOpen?'flex':'none'};flex-direction:column">
           <div class="notelog" style="max-height:320px">${thread||'<div class="meta">No message content stored for this thread yet (older thread; new mails will appear here automatically).</div>'}</div>
-          ${window.CANW!==false?`<div class="acts" style="margin-top:8px">
-            <select class="st" onchange="ticketReclass(${t.id},this.value);this.selectedIndex=0" onclick="event.stopPropagation()" title="Wrongly sorted into Support? Move it out.">
+          <div class="acts" style="margin-top:8px">
+            <button class="btn" onclick="remT(${t.id});event.stopPropagation()" title="A personal reminder under the 🔔 bell, e.g. 'promised an answer by Friday'">⏰ Remind me</button>
+            ${window.CANW!==false?`<select class="st" onchange="ticketReclass(${t.id},this.value);this.selectedIndex=0" onclick="event.stopPropagation()" title="Wrongly sorted into Support? Move it out.">
               <option value="">↪ Not support…</option>
               <option value="lead">→ Sales lead (partnership, enquiry)</option>
               <option value="junk">🗑 Junk, delete thread</option>
-            </select>
-          </div>`:""}
+            </select>`:""}
+          </div>
         </div></div>`;
       };
       const junked=ts.filter(t=>t.junked).sort(byAct);
@@ -1833,6 +1872,7 @@ const PANELS = {
         <button class="fbtn ${S.mine?'active':''}" onclick="supMine()" title="Only tickets assigned to you">👤 Mine</button>
         <button class="fbtn ${S.un?'active':''}" onclick="supUn()" title="Only tickets nobody has picked up yet">Unassigned</button>
         ${window.CANW!==false?`<button class="fbtn" onclick="newTicket()" title="Open a ticket by hand: phone complaint, walk-in, anything that did not arrive by mail">＋ New ticket</button>`:""}
+        ${sortSelX("support",[["recent","Sort: recent activity"],["silent","Sort: longest silent first"]],"recent")}
         <span style="flex:1"></span>${sf("days","all","All time")}${sf("days",30,"Opened ≤30d")}${sf("days",7,"Opened ≤7d")}</div>
       <h2>Waiting on us (${open.length})</h2>${open.map(row).join("")||'<div class="empty">Inbox zero 🎉</div>'}
       <h2>Waiting on customer (${wait.length})</h2>${wait.map(row).join("")||'<div class="empty">Nothing pending</div>'}
@@ -1849,7 +1889,11 @@ const PANELS = {
       const all=opsItems(), H=window.__opsHidden||new Map();
       const KINDS=[["all","Everything"],["payment","💳 Payments"],["service","🔧 Service"],["shipment","📦 Shipments"],
         ["questionnaire","📋 Questionnaires"],["test","🧪 Test periods"],["renewal","🔄 Renewals"],["check","⚖ Checks"]];
-      const arr=(O.kind==="all"?all:all.filter(i=>i.kind===O.kind)).sort((a,b)=>b.age-a.age);
+      const so=(window.__SORTX||{}).ops||"age";
+      const arr=(O.kind==="all"?all:all.filter(i=>i.kind===O.kind)).sort(
+        so==="amount"?(a,b)=>(((b.pp||{}).amount)||0)-(((a.pp||{}).amount)||0)
+        :so==="attempts"?(a,b)=>(((b.pp||{}).attempts)||0)-(((a.pp||{}).attempts)||0)
+        :(a,b)=>b.age-a.age);
       const q=(document.getElementById("q").value||"").toLowerCase().trim();
       const shown=q?arr.filter(i=>(i.who+" "+i.title+" "+(i.key||"")+" "+(i.email||"")).toLowerCase().includes(q)):arr;
       const hidden=shown.filter(i=>H.has(i.id));
@@ -1865,6 +1909,7 @@ const PANELS = {
           ${i.key?`<span class="chip">${jiraLink(i.key)}</span>`:""}
           ${i.kid&&upsLink(i.kid,i.loc)?`<a class="chip jump" href="${esc(upsLink(i.kid,i.loc))}" target="_blank" onclick="event.stopPropagation()">📦 track ↗</a>`:""}
           ${i.pp?`<button class="btn" onclick="copyTxt('${esc(i.email||"")}','email');event.stopPropagation()" title="Copy email">📋 ✉</button>`:""}
+          <button class="btn" onclick="remO('${i.id}');event.stopPropagation()" title="A personal reminder under the 🔔 bell for this item">⏰</button>
           ${window.CANW!==false?(hid
             ?`<button class="btn" onclick="opsRestore('${i.id}');event.stopPropagation()" title="Bring it back to the active list">↩</button>`
             :`<button class="btn" onclick="opsHide('${i.id}');event.stopPropagation()" title="Not actually being worked on? Mark it not active. Jira stays untouched, restorable below.">✓</button>`):""}
@@ -1872,7 +1917,8 @@ const PANELS = {
         </div></div>`;
       };
       return `<p class="hint">What is actually moving right now, read from Jira and Stripe. Anything untouched for 30+ days folds into "quiet" below: still open in the source, probably finished in reality. ✓ marks an item not active by hand (Jira is never touched). Unpaid right now: ${Math.round((window.__pprobs||[]).reduce((a,p)=>a+(p.amount||0),0)/100).toLocaleString()}€.</p>
-      <div class="filters">${KINDS.map(([k,lb])=>`<button class="fbtn ${O.kind===k?'active':''}" onclick="window.__OPS.kind='${k}';render()">${lb} ${cnt(k)?"("+cnt(k)+")":""}</button>`).join("")}</div>
+      <div class="filters">${KINDS.map(([k,lb])=>`<button class="fbtn ${O.kind===k?'active':''}" onclick="window.__OPS.kind='${k}';render()">${lb} ${cnt(k)?"("+cnt(k)+")":""}</button>`).join("")}
+        ${sortSelX("ops",[["age","Sort: oldest first"],["amount","Sort: highest amount (payments)"],["attempts","Sort: most attempts (payments)"]],"age")}</div>
       <h2>Our move (${ours.length})</h2>
       ${ours.map(row).join("")||'<div class="empty">Nothing waiting on us 🎉</div>'}
       <details class="tbl"><summary>⏳ Waiting on others (${theirs.length}): customers, carriers, banks</summary>
@@ -1907,10 +1953,12 @@ const PANELS = {
         <span class="meta">${esc(p.sub||"")} →</span>
       </div></div>`;
       const CAP=300;
-      const rows=[...arr.map(l=>({n:(l.name||"").toLowerCase(), h:()=>leadRow(l,{txt:lifecycleOf(l)==="client"?"client":lifecycleOf(l)==="support"?"support-only":"lead"})})),
-                  ...extras.map(p=>({n:(p.name||"").toLowerCase(), h:()=>prow(p)}))].sort((a,b)=>a.n.localeCompare(b.n));
+      const soP=(window.__SORTX||{}).people||"name";
+      const rows=[...arr.map(l=>({n:(l.name||"").toLowerCase(), act:l.lastPast?+l.lastPast:0, h:()=>leadRow(l,{txt:lifecycleOf(l)==="client"?"client":lifecycleOf(l)==="support"?"support-only":"lead"})})),
+                  ...extras.map(p=>({n:(p.name||"").toLowerCase(), act:0, h:()=>prow(p)}))]
+        .sort(soP==="active"?(a,b)=>(b.act-a.act)||a.n.localeCompare(b.n):(a,b)=>a.n.localeCompare(b.n));
       return `<p class="hint">Everyone the hub knows, one entry per human, whatever the source: Salesforce, coupons, email, Stripe, support mail, manual. Slim cards mean the person exists only in Stripe or the support inbox so far; click them to jump to their data.</p>
-      <div class="filters">${fb("all","All · "+counts.all)}${fb("lead","✦ Leads · "+counts.lead)}${fb("client","💰 Clients · "+counts.client)}${fb("support","🎧 Support-only · "+counts.support)}${selBtn()}</div>
+      <div class="filters">${fb("all","All · "+counts.all)}${fb("lead","✦ Leads · "+counts.lead)}${fb("client","💰 Clients · "+counts.client)}${fb("support","🎧 Support-only · "+counts.support)}${sortSelX("people",[["name","Sort: name"],["active","Sort: recently active"]],"name")}${selBtn()}</div>
       ${selBar(arr.map(l=>l.id))}
       ${rows.slice(0,CAP).map(r=>r.h()).join("")||'<div class="empty">Nobody matches</div>'}
       ${rows.length>CAP?`<p class="hint">Showing the first ${CAP} of ${rows.length}; use the search box to narrow down.</p>`:""}
@@ -1978,27 +2026,44 @@ window.setPF = f => { window.__PF=f; render(false); };
 const TABKEYS=["today","fresh","followups","coupons","funnel","clients","support","ops","people","trays"];
 function usersAdmin(){
   const users=window.__users||[];
+  const openU=window.__openU||(window.__openU=new Set());
   const urow=u=>{ const isMe=u.email===ME; const dis=isMe?"disabled":"";
     const meTitle="You cannot change your own access, ask another user-manager. That way nobody can lock themselves out again.";
-    return `<div class="card"><div class="row" style="cursor:default">
-    <div class="who"><span class="nm">${esc(u.name||u.email.split("@")[0])}</span><div class="co">${esc(u.email)}</div></div>
-    <label class="chip" style="cursor:${isMe?"not-allowed":"pointer"}" title="${isMe?meTitle:"May change data: statuses, notes, logs, tickets, merges, trays. Off = read-only."}">
-      <input type="checkbox" ${u.can_write?"checked":""} ${dis} onchange="uSet('${esc(u.email)}','can_write',this.checked)"> can edit data</label>
-    <label class="chip" style="cursor:${isMe?"not-allowed":"pointer"}" title="${isMe?meTitle:"May manage users here and always sees every tab."}">
-      <input type="checkbox" ${u.role==="admin"?"checked":""} ${dis} onchange="uSet('${esc(u.email)}','role',this.checked?'admin':'operator')"> manages users</label>
-    <label class="chip" title="Placetel extension (e.g. 25). Used by the CSV import to attribute calls.">☎ ext
-      <input class="li" style="width:48px;padding:2px 6px;font-size:12px" value="${esc(u.placetel_ext||"")}" onchange="uSet('${esc(u.email)}','placetel_ext',this.value.trim()||null)"></label>
-    <label class="chip" title="Placetel SIP peer of this person${ORG().peerExample?" (looks like "+ORG().peerExample+")":""}. The live call feed uses it to attribute calls; ask Claude to read it out of the events after their first call.">📟 peer
-      <input class="li" style="width:150px;padding:2px 6px;font-size:12px" value="${esc(u.placetel_peer||"")}" onchange="uSet('${esc(u.email)}','placetel_peer',this.value.trim()||null)"></label>
-    <label class="chip" title="Country codes this person owns, comma separated (US, CA, GB…). Unassigned leads from these countries show a one-click suggestion chip; nothing is ever assigned automatically.">🌍 territory
-      <input class="li" style="width:120px;padding:2px 6px;font-size:12px" placeholder="US, CA, GB" value="${esc((u.territory||[]).join(", "))}" onchange="uSet('${esc(u.email)}','territory',this.value.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean))"></label>
-    ${isMe?'<span class="chip">you</span>':`<button class="btn" onclick="uDel('${esc(u.email)}')" title="Remove from the hub">🗑</button>`}
+    const isOpen=openU.has(u.email);
+    const summary=[
+      u.role==="admin"?"manages users":null,
+      u.can_write?"edits data":"read-only",
+      u.role==="admin"?"all tabs":((u.tabs||[]).length+" tab"+((u.tabs||[]).length===1?"":"s")),
+      (u.territory||[]).length?"🌍 "+(u.territory||[]).join(", "):null,
+      u.placetel_ext?"☎ ext "+u.placetel_ext:null
+    ].filter(Boolean).join(" · ");
+    return `<div class="card ${isOpen?'open':''}"><div class="row" onclick="uOpen('${esc(u.email)}')">
+    <div class="who"><span class="nm">${esc(u.name||u.email.split("@")[0])}${isMe?' <span class="chip">you</span>':""}</span>
+      <div class="co">${esc(u.email)} · ${esc(summary)}</div></div>
+    ${u.invited_at?`<span class="chip" title="Invitation email sent; they set their own password through its link">✉ invited ${esc(String(u.invited_at).slice(0,10))}</span>`:""}
+    <span class="meta">${isOpen?"▴":"▾ details"}</span>
+  </div>
+  <div class="detail" style="display:${isOpen?'flex':'none'}" onclick="event.stopPropagation()">
+    <div class="acts" style="width:100%">
+      <label class="chip" style="cursor:${isMe?"not-allowed":"pointer"}" title="${isMe?meTitle:"May change data: statuses, notes, logs, tickets, merges, trays. Off = read-only."}">
+        <input type="checkbox" ${u.can_write?"checked":""} ${dis} onchange="uSet('${esc(u.email)}','can_write',this.checked)"> can edit data</label>
+      <label class="chip" style="cursor:${isMe?"not-allowed":"pointer"}" title="${isMe?meTitle:"May manage users here and always sees every tab."}">
+        <input type="checkbox" ${u.role==="admin"?"checked":""} ${dis} onchange="uSet('${esc(u.email)}','role',this.checked?'admin':'operator')"> manages users</label>
+      <label class="chip" title="Placetel extension (e.g. 25). Used by the CSV import to attribute calls.">☎ ext
+        <input class="li" style="width:48px;padding:2px 6px;font-size:12px" value="${esc(u.placetel_ext||"")}" onchange="uSet('${esc(u.email)}','placetel_ext',this.value.trim()||null)"></label>
+      <label class="chip" title="Placetel SIP peer of this person${ORG().peerExample?" (looks like "+ORG().peerExample+")":""}. The live call feed uses it to attribute calls; ask Claude to read it out of the events after their first call.">📟 peer
+        <input class="li" style="width:150px;padding:2px 6px;font-size:12px" value="${esc(u.placetel_peer||"")}" onchange="uSet('${esc(u.email)}','placetel_peer',this.value.trim()||null)"></label>
+      <label class="chip" title="Country codes this person owns, comma separated (US, CA, GB…). Unassigned leads from these countries show a one-click suggestion chip; nothing is ever assigned automatically.">🌍 territory
+        <input class="li" style="width:120px;padding:2px 6px;font-size:12px" placeholder="US, CA, GB" value="${esc((u.territory||[]).join(", "))}" onchange="uSet('${esc(u.email)}','territory',this.value.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean))"></label>
+      <button class="btn" onclick="uInvite('${esc(u.email)}')" title="Email them an invitation link to set their own password">✉ ${u.invited_at?"Re-send invite":"Send invite"}</button>
+      ${isMe?"":`<button class="btn" onclick="uDel('${esc(u.email)}')" title="Remove from the hub">🗑 Remove</button>`}
+    </div>
     <div style="width:100%;display:flex;gap:4px;flex-wrap:wrap">
       ${TABKEYS.map(k=>`<label class="chip" style="cursor:pointer" title="Tab visible for this user (user-managers always see everything)"><input type="checkbox" ${(u.tabs||[]).includes(k)?"checked":""} onchange="uTab('${esc(u.email)}','${k}',this.checked)"> ${PANELS[k]?PANELS[k].title:k}</label>`).join("")}
     </div>
   </div></div>`;};
   return `<h2>Users</h2>
-  <p class="hint">Two switches per person: "can edit data" (off = read-only viewer) and "manages users" (this panel + every tab). Tab checkboxes control what everyone else sees. Adding a row sets permissions; the login itself is created separately by an admin (public sign-ups are off).</p>
+  <p class="hint">One row per person; click it for the switches, tabs and territory. "Can edit data" off = read-only viewer; "manages users" = this panel plus every tab. Adding a user emails them an invitation to pick their own password (public sign-ups stay off).</p>
   ${users.map(urow).join("")||'<div class="empty">No users yet</div>'}
   <div class="card"><div class="row" style="cursor:default">
     <input class="li" id="nu-email" placeholder="name@${esc(ORG().mailDomain||"company.tld")}" style="min-width:200px">
@@ -2008,6 +2073,11 @@ function usersAdmin(){
     <button class="btn primary" onclick="uAdd()">+ Add user</button>
   </div></div>`;
 }
+window.uOpen = em => {
+  const s=window.__openU||(window.__openU=new Set());
+  s.has(em)?s.delete(em):s.add(em);
+  render(false);
+};
 /* the activity log: user-managers only, filterable by person and by user.
    Regular timelines no longer show these entries. */
 function activityAdmin(){
@@ -2072,7 +2142,23 @@ window.uAdd=async()=>{
   const {error}=await sb.from("app_users").insert(rec);
   if(error){ hubAlert("Add failed", esc(error.message)); return; }
   (window.__users=window.__users||[]).push(rec);
-  toast("User added ✓, their login is created separately by an admin"); render(false);
+  render(false);
+  await uInvite(em);   // access rules exist either way; the invite mail can be re-sent from the row
+};
+/* the invitation email: sent by the database itself (no PC, no server involved).
+   The person clicks the link and chooses their own password; nobody hands
+   passwords around. */
+window.uInvite = async em => {
+  const {data:inv, error:ie}=await sb.rpc("invite_user",{target:em});
+  if(ie || !inv || inv.ok===false){
+    hubAlert("User saved, invitation not sent",
+      esc((inv&&inv.message)||(ie&&ie.message)||"unknown error")+"<br><br>Their access rules are in place. Fix the invite setup and press \"Send invite\" on their row, or create the login the old way.");
+    return false;
+  }
+  const u=(window.__users||[]).find(x=>x.email===em);
+  if(u) u.invited_at=new Date().toISOString();
+  toast("Invitation email sent to "+em);
+  render(false); return true;
 };
 window.uDel=async em=>{
   if(!await hubConfirm("Remove "+esc(em)+" from the hub?","They lose all access rules; the login account itself is removed separately.","Remove")) return;
@@ -2102,7 +2188,7 @@ function render(){
   const nav=document.getElementById("nav");
   const cnt=p=>{ try{ return p.count(); }catch(e){ console.error("count failed:",e); return "!"; } };
   try{
-    nav.innerHTML=`<div class="brand">OrderCube Hub<small>sales &amp; support</small></div>`+
+    nav.innerHTML=`<div class="brand">${esc(ORG().brand||"Hub")}<small>sales &amp; support</small></div>`+
       Object.entries(PANELS).filter(([k,p])=>!p.hidden &&
         (!window.PROFILE || PROFILE.role==="admin" || (PROFILE.tabs||[]).includes(k))).map(([k,p])=>
         `<button class="navbtn ${k===CURRENT?'active':''}" onclick="go('${k}')">${p.title}<span class="cnt">${cnt(p)}</span></button>`).join("")+
@@ -2118,11 +2204,18 @@ function render(){
           return lines.length?lines.join("<br>")+"<br>":"";
         }catch(e){return "";}})()}
         <a onclick="cycleTheme()" title="Switch between auto (follows your system), light and dark">◐ Theme: ${localStorage.getItem("hub_theme")||"auto"}</a><br>
-        <a onclick="go('settings')" title="Open settings">⚙️ ${esc(ME||"Settings")}</a><br>
+        <a onclick="go('settings')" title="Open settings">⚙️ ${esc(ME||"Settings")}</a>${(()=>{try{
+          const rems=(window.__rems||[]).filter(r=>!r.done_at);
+          const due=rems.filter(r=>day(r.due)&&day(r.due)<=TODAY);
+          const KI={sales:"✦",support:"🎫",ops:"🔧"};
+          const b=["sales","support","ops"].map(k=>[KI[k],due.filter(r=>r.kind===k).length]).filter(x=>x[1]).map(([ic,n])=>n+ic).join(" ");
+          return ` <a onclick="remList()" title="Your reminders${due.length?": "+due.length+" due now":rems.length?": "+rems.length+" upcoming":""} (✦ people, 🎫 tickets, 🔧 operations)" style="${due.length?"color:var(--crit);font-weight:600":""}">🔔${b?" "+b:""}</a>`;
+        }catch(e){return "";}})()}<br>
         <span title="When a sync engine last wrote data into the hub. The page keeps itself up to date on its own.">Data: ${(()=>{try{const r=(window.__syncRuns||[])[0]; const d=r?r.ran_at:STATS.refreshedAt; return d? new Date(d).toLocaleString(undefined,{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"?";}catch(e){return "?";}})()}</span>
         ${window.CANW!==false?`<br><a onclick="syncNow()" title="Go and fetch new data from Salesforce, the mailboxes, Stripe, Placetel and the coupon panel right now, instead of waiting for the next half-hour run">⚡ Sync now</a> · `:"<br>"}<a onclick="refreshData()" title="Show the newest data that is already in the hub (happens automatically every few minutes anyway)">⟳ reload</a></div>`;
   }catch(e){ console.error("nav failed:", e); }
   try{ document.getElementById("title").textContent=PANELS[CURRENT].title; }catch(e){}
+  try{ if(ORG().brand) document.title=ORG().brand; }catch(e){}
   let html;
   try{ html=(PANELS[CURRENT].filterable?viewbar():"")+PANELS[CURRENT].render(); }
   catch(err){ html=errCard("Tab \""+CURRENT+"\"", err); }
@@ -2132,8 +2225,8 @@ function render(){
   try{
     const n=activeFilterCount();
     document.getElementById("hctl").innerHTML = viewsSel() +
-      (n?`<button class="fbtn active" onclick="showFilters()" title="See in plain words what is narrowing your view">👁 ${n} filter${n>1?"s":""}</button>
-          <button class="fbtn active" onclick="resetFilters()" title="Reset all filters in one click">✕</button>`:"");
+      `<button class="fbtn ${n?'active':''}" onclick="showFilters()" title="See and change what is narrowing your view">👁 ${n?n+" filter"+(n>1?"s":""):"Filters"}</button>` +
+      (n?`<button class="fbtn active" onclick="resetFilters()" title="Reset all filters in one click">✕</button>`:"");
     const qc=document.getElementById("qclear");
     if(qc) qc.style.display=(document.getElementById("q").value||"")?"block":"none";
     const pb=document.getElementById("plusbtn");
@@ -2152,6 +2245,7 @@ window.plusMenu = () => {
     ${item("🎟","Coupon","Discount code through the admin panel, emailed to the customer if you want","newCoupon()")}
     ${item("🎫","Support ticket","A complaint or question that arrived by phone or in person","newTicket()")}
     ${item("📝","Note on a person","Find someone and pin a note to their timeline","newNoteFlow()")}
+    ${item("⏰","Reminder","About a person, a support ticket or an operations item: it pops up under the 🔔 bell on the day","remFlow()")}
     <div class="acts" style="justify-content:flex-end"><button class="btn" onclick="document.getElementById('mergeov').remove()">Cancel</button></div></div>`;
   ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
   document.body.appendChild(ov);
@@ -2196,6 +2290,165 @@ window.newNoteFlow = () => {
     if(error){ hubAlert("Failed", esc(error.message)); return; }
     toast("Note saved ✓"); await loadData(true); render();
   });
+};
+/* ---------- unified reminders: one bell for people, tickets and operations ----------
+   The per-lead "⏰ Remind me…" select on cards is untouched: that one drives the
+   queue. These reminders are personal notes-to-self that surface under 🔔. */
+window.remFlow = () => {
+  let ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  ov=document.createElement("div"); ov.id="mergeov";
+  const item=(icon,lb,sub,act)=>`<div class="mhit" onclick="${act}" style="padding:10px"><b>${icon} ${lb}</b><br><span class="meta">${sub}</span></div>`;
+  ov.innerHTML=`<div class="mcard"><h3>⏰ Remind me about…</h3>
+    ${item("✦","A person","A lead or client to get back to","remPickPerson()")}
+    ${item("🎫","A support ticket","Something you promised a customer","remPickTicket()")}
+    ${item("🔧","An operations item","A payment, shipment, renewal or check","remPickOps()")}
+    <div class="acts" style="justify-content:flex-end"><button class="btn" onclick="document.getElementById('mergeov').remove()">Cancel</button></div></div>`;
+  ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
+  document.body.appendChild(ov);
+};
+window.remPickPerson = () => pickPerson("⏰ Remind me about whom?", id=>remDialog("sales",{person_id:id},(byId[id]||{}).name||""));
+window.remPickTicket = () => {
+  let ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  ov=document.createElement("div"); ov.id="mergeov";
+  ov.innerHTML=`<div class="mcard"><h3>⏰ Which ticket?</h3>
+    <input class="li" id="rp-q" placeholder="Customer or subject…" oninput="remTickSearch()">
+    <div id="rp-res" style="max-height:260px;overflow-y:auto"></div>
+    <div class="acts" style="justify-content:flex-end"><button class="btn" onclick="document.getElementById('mergeov').remove()">Cancel</button></div></div>`;
+  ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
+  document.body.appendChild(ov);
+  remTickSearch(); ov.querySelector("#rp-q").focus();
+};
+window.remTickSearch = () => {
+  const q=((document.getElementById("rp-q")||{}).value||"").toLowerCase().trim();
+  const res=document.getElementById("rp-res"); if(!res) return;
+  const ts=(window.__tickets||[]).filter(t=>!t.junked && t.state!=="resolved")
+    .filter(t=>!q||[t.customer_name,t.customer_email,t.subject].some(v=>(v||"").toLowerCase().includes(q))).slice(0,10);
+  window.__rpHits=ts;
+  res.innerHTML=ts.map((t,i)=>`<div class="mhit" onclick="remTickPick(${i})">
+    <b>${esc(t.customer_name||t.customer_email||"?")}</b> <span class="meta">${esc((t.subject||"").slice(0,60))}</span></div>`).join("")
+    ||'<div class="meta" style="padding:8px">No open ticket matches</div>';
+};
+window.remTickPick = i => {
+  const t=(window.__rpHits||[])[i]; if(!t) return;
+  remDialog("support",{ticket_id:t.id},(t.customer_name||t.customer_email||"?")+" · "+(t.subject||""));
+};
+window.remPickOps = () => {
+  let ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  ov=document.createElement("div"); ov.id="mergeov";
+  ov.innerHTML=`<div class="mcard"><h3>⏰ Which operations item?</h3>
+    <input class="li" id="rp-q" placeholder="Name, company or amount…" oninput="remOpsSearch()">
+    <div id="rp-res" style="max-height:260px;overflow-y:auto"></div>
+    <div class="acts" style="justify-content:flex-end"><button class="btn" onclick="document.getElementById('mergeov').remove()">Cancel</button></div></div>`;
+  ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
+  document.body.appendChild(ov);
+  remOpsSearch(); ov.querySelector("#rp-q").focus();
+};
+window.remOpsSearch = () => {
+  const q=((document.getElementById("rp-q")||{}).value||"").toLowerCase().trim();
+  const res=document.getElementById("rp-res"); if(!res) return;
+  let items=[]; try{ items=opsItems(); }catch(e){}
+  const strip=s=>String(s||"").replace(/<[^>]*>/g,"");
+  const hits=items.filter(i=>!q||(strip(i.who)+" "+i.title+" "+(i.key||"")).toLowerCase().includes(q)).slice(0,10);
+  window.__rpOps=hits;
+  res.innerHTML=hits.map((i2,i)=>`<div class="mhit" onclick="remOpsPick(${i})">
+    <b>${i2.icon} ${i2.who}</b> <span class="meta">${esc(i2.title.slice(0,70))}</span></div>`).join("")
+    ||'<div class="meta" style="padding:8px">Nothing open matches</div>';
+};
+window.remOpsPick = i => {
+  const it=(window.__rpOps||[])[i]; if(!it) return;
+  const strip=s=>String(s||"").replace(/<[^>]*>/g,"");
+  remDialog("ops",{ops_id:it.id},strip(it.who)+" · "+it.title);
+};
+window.remT = id => {
+  const t=(window.__tickets||[]).find(x=>x.id===id); if(!t) return;
+  remDialog("support",{ticket_id:id},(t.customer_name||t.customer_email||"?")+" · "+(t.subject||""));
+};
+window.remO = id => {
+  let it=null; try{ it=opsItems().find(x=>x.id===id); }catch(e){}
+  const strip=s=>String(s||"").replace(/<[^>]*>/g,"");
+  remDialog("ops",{ops_id:id}, it?strip(it.who)+" · "+it.title:id);
+};
+window.remDialog = (kind, target, label) => {
+  let ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  ov=document.createElement("div"); ov.id="mergeov";
+  const d=new Date(TODAY); d.setDate(d.getDate()+1);
+  const dflt=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  ov.innerHTML=`<div class="mcard"><h3>⏰ Reminder</h3>
+    <div class="meta">${esc(label||"")}</div>
+    <label class="chip">on <input class="li" id="rem-due" type="date" value="${dflt}" style="padding:2px 6px"></label>
+    <input class="li" id="rem-note" placeholder="What should future-you remember?">
+    <div class="acts" style="justify-content:flex-end">
+      <button class="btn" onclick="document.getElementById('mergeov').remove()">Cancel</button>
+      <button class="btn primary" id="rem-save">Save reminder</button>
+    </div></div>`;
+  ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
+  document.body.appendChild(ov);
+  ov.querySelector("#rem-note").focus();
+  ov.querySelector("#rem-save").onclick=async()=>{
+    const due=(document.getElementById("rem-due")||{}).value;
+    const note=((document.getElementById("rem-note")||{}).value||"").trim();
+    if(!due){ toast("Pick a date first"); return; }
+    const rec={kind, due, note:note||null, owner:ME, label:(label||"").slice(0,160)||null,
+      person_id:target.person_id||null, ticket_id:target.ticket_id||null, ops_id:target.ops_id||null};
+    const {data,error}=await sb.from("reminders").insert(rec).select("*").single();
+    if(error){ hubAlert("Could not save the reminder", esc(error.message)); return; }
+    (window.__rems=window.__rems||[]).push(data);
+    const o2=document.getElementById("mergeov"); if(o2) o2.remove();
+    toast("Reminder saved: "+day(due).toLocaleDateString(undefined,{day:"numeric",month:"short"}));
+    render(false);
+  };
+};
+window.remList = () => {
+  const rems=(window.__rems||[]).filter(r=>!r.done_at)
+    .sort((a,b)=>String(a.due).localeCompare(String(b.due)));
+  window.__remShown=rems;
+  const old=document.getElementById("mergeov"); if(old) old.remove();
+  const KI={sales:"✦",support:"🎫",ops:"🔧"};
+  const tgt=r=> r.label ? r.label
+    : r.person_id&&byId[r.person_id] ? (byId[r.person_id].name||"")
+    : r.ticket_id ? "ticket #"+r.ticket_id : (r.ops_id||"");
+  const rowR=(r,i)=>{
+    const dueD=day(r.due), isDue=dueD&&dueD<=TODAY;
+    return `<div class="row" style="cursor:default;display:flex;align-items:center;gap:8px;padding:5px 0">
+      <span class="meta ${isDue?'due':''}" style="min-width:64px">${dueD?dueD.toLocaleDateString(undefined,{day:"numeric",month:"short"}):esc(r.due)}</span>
+      <span style="flex:1">${KI[r.kind]||"⏰"} ${esc(tgt(r))}${r.note?` <span class="meta">${esc(r.note)}</span>`:""}</span>
+      ${(r.person_id&&byId[r.person_id])||r.ticket_id||r.ops_id?`<button class="btn" onclick="remGo(${i})" title="Open what this is about">→</button>`:""}
+      <button class="btn" onclick="remDone(${i})" title="Done: it leaves the bell">✓</button>
+      <button class="btn" onclick="remDel(${i})" title="Delete without marking done">🗑</button></div>`;
+  };
+  const due=rems.map((r,i)=>({r,i})).filter(x=>day(x.r.due)&&day(x.r.due)<=TODAY);
+  const later=rems.map((r,i)=>({r,i})).filter(x=>!(day(x.r.due)&&day(x.r.due)<=TODAY));
+  const ov=document.createElement("div"); ov.id="mergeov";
+  ov.innerHTML=`<div class="mcard" style="width:560px"><h3>🔔 Your reminders</h3>
+    ${due.length?`<div class="meta"><b>Due now</b></div>${due.map(x=>rowR(x.r,x.i)).join("")}`:""}
+    ${later.length?`<div class="meta" style="margin-top:6px"><b>Upcoming</b></div>${later.map(x=>rowR(x.r,x.i)).join("")}`:""}
+    ${rems.length?"":'<div class="empty">No reminders. Set one from the ＋ menu, a ticket, or an operations row.</div>'}
+    <div class="acts" style="justify-content:flex-end;margin-top:8px">
+      <button class="btn" onclick="document.getElementById('mergeov').remove()">Close</button>
+    </div></div>`;
+  ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
+  document.body.appendChild(ov);
+};
+window.remGo = i => {
+  const r=(window.__remShown||[])[i]; if(!r) return;
+  const ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  if(r.person_id&&byId[r.person_id]) openPerson(r.person_id);
+  else if(r.ticket_id) openTicket(r.ticket_id);
+  else if(r.ops_id) go("ops");
+};
+window.remDone = async i => {
+  const r=(window.__remShown||[])[i]; if(!r) return;
+  const now=new Date().toISOString();
+  const {error}=await sb.from("reminders").update({done_at:now}).eq("id",r.id);
+  if(error){ hubAlert("Failed", esc(error.message)); return; }
+  r.done_at=now; toast("Done ✓"); render(false); remList();
+};
+window.remDel = async i => {
+  const r=(window.__remShown||[])[i]; if(!r) return;
+  const {error}=await sb.from("reminders").delete().eq("id",r.id);
+  if(error){ hubAlert("Failed", esc(error.message)); return; }
+  window.__rems=(window.__rems||[]).filter(x=>x.id!==r.id);
+  toast("Deleted"); render(false); remList();
 };
 window.go=k=>{CURRENT=k;FILTER="all";if(k!=="settings")window.__lastTab=k;render();window.scrollTo(0,0);};
 window.jump=id=>{const el=document.getElementById(id); if(el) el.scrollIntoView({behavior:"smooth"});};
@@ -2361,7 +2614,7 @@ window.newCoupon = pid => {
         <select class="st" id="nc-dcountry">${opts(CO)}</select>
       </div>
       <div class="acts" style="margin-top:8px">
-        <label class="chip">OrderCubes <input class="li" id="nc-cubes" type="number" min="0" placeholder="5" style="width:64px;padding:2px 6px"></label>
+        <label class="chip">Cubes <input class="li" id="nc-cubes" type="number" min="0" placeholder="5" style="width:64px;padding:2px 6px"></label>
         <label class="chip">Tablets <input class="li" id="nc-tablets" type="number" min="0" placeholder="2" style="width:64px;padding:2px 6px"></label>
         <label class="chip">Smartwatches <input class="li" id="nc-watches" type="number" min="0" placeholder="1" style="width:64px;padding:2px 6px"></label>
         <select class="st" id="nc-cond">${opts([["","condition —"],["new","New"],["refurbished","Refurbished"]])}</select>
@@ -2433,7 +2686,7 @@ window.createCoupon = async pid => {
     street:g("nc-street")||null, zip:g("nc-zip")||null, city:g("nc-city")||null, country:g("nc-country")||null,
     del_street:delOn?(g("nc-dstreet")||null):null, del_zip:delOn?(g("nc-dzip")||null):null,
     del_city:delOn?(g("nc-dcity")||null):null, del_country:delOn?(g("nc-dcountry")||null):null,
-    ordercubes:num("nc-cubes"), tablets:num("nc-tablets"), smartwatches:num("nc-watches"),
+    cubes:num("nc-cubes"), tablets:num("nc-tablets"), smartwatches:num("nc-watches"),
     condition:g("nc-cond")||null,
     send_email:!!(document.getElementById("nc-mail")||{}).checked, requested_by:ME };
   const {data,error}=await sb.from("coupon_requests").insert(rec).select("*").single();
@@ -2589,9 +2842,13 @@ function viewsSel(){
     <option value="">👁 ${esc(window.__curView||"Views…")}</option>
     ${names.map(n=>`<option value="v:${esc(n)}">${esc(n)}${n===window.__curView?" ✓":""}</option>`).join("")}
     <option value="__save">＋ Save current as view…</option>
-    ${window.__curView?`<option value="__del">🗑 Delete "${esc(window.__curView)}"</option>`:""}
+    ${window.__curView?`<option value="__update">💾 Update "${esc(window.__curView)}" with current filters</option>
+    <option value="__ren">✏️ Rename "${esc(window.__curView)}"…</option>
+    <option value="__del">🗑 Delete "${esc(window.__curView)}"</option>`:""}
   </select>`;
 }
+/* what a saved view remembers: filters, sort, and the tab it lives on */
+const viewSnap = () => ({ view: VIEW, support: window.__SUP||{}, filter: FILTER, pf: window.__PF||"all", sort: window.SORT||"recent", tab: window.__lastTab||CURRENT });
 window.viewAction = async v => {
   if(!v) return;
   const P = window.__PREFS = (window.__PREFS||{}); P.views = P.views||{};
@@ -2599,9 +2856,27 @@ window.viewAction = async v => {
     const name = await hubPrompt("💾 Save current view", {placeholder:"Name, e.g. DACH support or US hot leads", okLabel:"Save view"});
     if(!name || !String(name).trim()) return;
     const nm = String(name).trim().slice(0,40);
-    P.views[nm] = { view: VIEW, support: window.__SUP||{}, filter: FILTER, pf: window.__PF||"all", sort: window.SORT||"recent", tab: window.__lastTab||CURRENT };
+    P.views[nm] = viewSnap();
     window.__curView = nm;
     if(await savePrefs()) toast("View saved: "+nm);
+    render(false);
+  } else if(v==="__update"){
+    if(!window.__curView) return;
+    P.views[window.__curView] = viewSnap();
+    if(await savePrefs()) toast('View "'+window.__curView+'" updated with the current filters');
+    render(false);
+  } else if(v==="__ren"){
+    if(!window.__curView) return;
+    const name = await hubPrompt('✏️ Rename view "'+esc(window.__curView)+'"', {value:window.__curView, okLabel:"Rename"});
+    if(!name || !String(name).trim()) return;
+    const nm = String(name).trim().slice(0,40);
+    if(nm!==window.__curView){
+      if(P.views[nm] && !await hubConfirm('A view called "'+esc(nm)+'" already exists.','Replace it with this one?','Replace')) return;
+      P.views[nm]=P.views[window.__curView];
+      delete P.views[window.__curView];
+      window.__curView=nm;
+      if(await savePrefs()) toast("View renamed to "+nm);
+    }
     render(false);
   } else if(v==="__del"){
     if(!window.__curView) return;
@@ -2674,19 +2949,19 @@ function activeFilterList(){
     const counts={}; LEADS.filter(l=>!l.internal).forEach(l=>counts[l.cc]=1);
     const all=Object.keys(counts).length, set=activeCountries();
     const shown=Object.keys(counts).filter(c=>set.has(c)).length;
-    if(shown<all) out.push({t:"🌍 Countries: "+shown+" of "+all+" shown", clear:()=>{VIEW.preset="all";VIEW.extra=null;saveView();}});
+    if(shown<all) out.push({t:"🌍 Countries: "+shown+" of "+all+" shown", kind:"cc", scope:"global", clear:()=>{VIEW.preset="all";VIEW.extra=null;saveView();}});
   }catch(e){}
-  if(VIEW.callable) out.push({t:"☎ Callable now only ("+CAD().callFrom+":00 to "+CAD().callTo+":00 their local time)", clear:()=>{VIEW.callable=false;saveView();}});
-  if(VIEW.range && VIEW.range!=="all") out.push({t:"📅 Date range: "+(typeof VIEW.range==="number" ? "last "+VIEW.range+" days" : (VIEW.range.f||"…")+" to "+(VIEW.range.t||"…")), clear:()=>{VIEW.range="all";saveView();}});
-  if(FILTER!=="all") out.push({t:"📋 List filter: "+FILTER, clear:()=>{FILTER="all";}});
+  if(VIEW.callable) out.push({t:"☎ Callable now only ("+CAD().callFrom+":00 to "+CAD().callTo+":00 their local time)", scope:"global", clear:()=>{VIEW.callable=false;saveView();}});
+  if(VIEW.range && VIEW.range!=="all") out.push({t:"📅 Date range: "+(typeof VIEW.range==="number" ? "last "+VIEW.range+" days" : (VIEW.range.f||"…")+" to "+(VIEW.range.t||"…")), kind:"range", scope:"global", clear:()=>{VIEW.range="all";saveView();}});
+  if(FILTER!=="all") out.push({t:"📋 List filter: "+FILTER, scope:"tab", tab:CURRENT, clear:()=>{FILTER="all";}});
   const S=window.__SUP||{};
-  if(S.lang && S.lang!=="all") out.push({t:"🎫 Support language: "+String(S.lang).toUpperCase()+" only", clear:()=>{S.lang="all";}});
-  if(S.days && S.days!=="all") out.push({t:"🎫 Tickets opened within "+S.days+" days", clear:()=>{S.days="all";}});
-  if(S.mine) out.push({t:"🎫 Support: only assigned to me", clear:()=>{S.mine=false;}});
-  if(S.un) out.push({t:"🎫 Support: only unassigned", clear:()=>{S.un=false;}});
-  if(window.__PF && window.__PF!=="all") out.push({t:"👥 People: "+window.__PF+" only", clear:()=>{window.__PF="all";}});
+  if(S.lang && S.lang!=="all") out.push({t:"🎫 Language: "+String(S.lang).toUpperCase()+" only", scope:"tab", tab:"support", clear:()=>{S.lang="all";}});
+  if(S.days && S.days!=="all") out.push({t:"🎫 Tickets opened within "+S.days+" days", scope:"tab", tab:"support", clear:()=>{S.days="all";}});
+  if(S.mine) out.push({t:"🎫 Only assigned to me", scope:"tab", tab:"support", clear:()=>{S.mine=false;}});
+  if(S.un) out.push({t:"🎫 Only unassigned", scope:"tab", tab:"support", clear:()=>{S.un=false;}});
+  if(window.__PF && window.__PF!=="all") out.push({t:"👥 People: "+window.__PF+" only", scope:"tab", tab:"people", clear:()=>{window.__PF="all";}});
   const qv=((document.getElementById("q")||{}).value||"").trim();
-  if(qv) out.push({t:'🔎 Search: "'+qv+'"', clear:()=>{const el=document.getElementById("q"); if(el) el.value="";}});
+  if(qv) out.push({t:'🔎 Search: "'+qv+'"', scope:"global", clear:()=>{const el=document.getElementById("q"); if(el) el.value="";}});
   return out;
 }
 window.clearOneFilter = i => {
@@ -2694,18 +2969,52 @@ window.clearOneFilter = i => {
   try{ f.clear(); }catch(e){}
   render(false); showFilters();          // reopen so several can be removed in a row
 };
+/* the dialog edits the global filters right where they are shown */
+window.dlgCC = cc => { toggleCC(cc); showFilters(); };
+window.dlgCCAll = () => { ccSelectAll(); showFilters(); };
+window.dlgCCNone = () => { ccSelectNone(); showFilters(); };
+window.dlgCCMine = () => { VIEW.extra=null; VIEW.preset="my"; saveView(); render(false); showFilters(); };
+window.dlgRange = v => { setRange(v); showFilters(); };
+window.dlgRangeApply = () => {
+  const f=(document.getElementById("dlg-dfrom")||{}).value, t=(document.getElementById("dlg-dto")||{}).value;
+  VIEW.range = (!f && !t) ? "all" : {f:f||"", t:t||""};
+  saveView(); render(false); showFilters();
+};
+window.dlgCallable = () => { VIEW.callable=!VIEW.callable; saveView(); render(false); showFilters(); };
 window.showFilters = () => {
   const list=activeFilterList();
   window.__afl=list;
   const old=document.getElementById("mergeov"); if(old) old.remove();
-  if(!list.length){ toast("No filters active, you see everything"); return; }
+  const counts={}; LEADS.filter(l=>!l.internal).forEach(l=>counts[l.cc]=(counts[l.cc]||0)+1);
+  const set=activeCountries();
+  const ccChips=Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([cc,n])=>
+    `<button class="fbtn ${set.has(cc)?'active':''}" onclick="dlgCC('${cc}')" title="Click to show or hide this country">${flag(cc)} ${esc(CC_NAME[cc]||cc)} · ${n}</button>`).join("");
+  const rb=(v,lb)=>`<button class="fbtn ${String(VIEW.range)===String(v)?'active':''}" onclick="dlgRange('${v}')">${lb}</button>`;
+  // countries and date range are edited right here; everything else is a line with its own ✕
+  const lines=list.map((f,i)=>({f,i})).filter(x=>x.f.kind!=="cc" && x.f.kind!=="range");
+  const line=x=>`<div class="row" style="cursor:default;display:flex;align-items:center;gap:8px;padding:4px 0">
+      <span style="flex:1">${esc(x.f.t)} <span class="meta">${x.f.scope==="global"?"· everywhere":"· "+((PANELS[x.f.tab]||{}).title||x.f.tab)+" tab"}</span></span>
+      ${x.f.scope==="tab"&&x.f.tab&&x.f.tab!==CURRENT?`<button class="btn" onclick="document.getElementById('mergeov').remove();go('${x.f.tab}')" title="This filter lives on another tab">→ ${esc((PANELS[x.f.tab]||{}).title||x.f.tab)}</button>`:""}
+      <button class="btn" onclick="clearOneFilter(${x.i})" title="Remove only this filter">✕</button></div>`;
   const ov=document.createElement("div"); ov.id="mergeov";
-  ov.innerHTML=`<div class="mcard"><h3>Filters narrowing your view</h3>
-    ${list.map((f,i)=>`<div class="row" style="cursor:default;display:flex;align-items:center;gap:8px;padding:4px 0">
-      <span style="flex:1">${esc(f.t)}</span>
-      <button class="btn" onclick="clearOneFilter(${i})" title="Remove only this filter">✕</button></div>`).join("")}
+  ov.innerHTML=`<div class="mcard" style="width:560px"><h3>Your filters</h3>
+    <div class="meta"><b>Everywhere:</b> countries and date range narrow every tab. Change them right here.</div>
+    <div class="filters" style="margin:0">
+      <button class="fbtn" onclick="dlgCCMine()">🏠 My territory</button>
+      <button class="fbtn" onclick="dlgCCAll()">✓ All countries</button>
+      <button class="fbtn" onclick="dlgCCNone()">✗ None</button>
+      <button class="fbtn ${VIEW.callable?'active':''}" onclick="dlgCallable()">☎ Callable now: ${VIEW.callable?"on":"off"}</button>
+    </div>
+    <div class="filters" style="margin:0;max-height:150px;overflow-y:auto">${ccChips}</div>
+    <div class="filters" style="margin:0">
+      ${rb("all","All 2026")}${rb(90,"90d")}${rb(30,"30d")}${rb(7,"7d")}
+      <input type="date" class="li" id="dlg-dfrom" style="padding:4px 8px;font-size:12px" value="${(VIEW.range&&VIEW.range.f)||""}" title="From date">
+      <input type="date" class="li" id="dlg-dto" style="padding:4px 8px;font-size:12px" value="${(VIEW.range&&VIEW.range.t)||""}" title="To date">
+      <button class="fbtn" onclick="dlgRangeApply()">→ Apply dates</button>
+    </div>
+    ${lines.length?`<div class="meta" style="margin-top:6px"><b>Also narrowing your view:</b></div>${lines.map(line).join("")}`:'<div class="meta" style="margin-top:6px">No other filters active.</div>'}
     <div class="acts" style="justify-content:flex-end;margin-top:8px">
-      <button class="btn" onclick="document.getElementById('mergeov').remove()">Keep them</button>
+      <button class="btn" onclick="document.getElementById('mergeov').remove()">Done</button>
       <button class="btn primary" onclick="document.getElementById('mergeov').remove();resetFilters()">✕ Reset all</button>
     </div></div>`;
   ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
@@ -2810,6 +3119,9 @@ function weekStats(){
   // conversation is 2+ minutes (the same rule as the 🔥 flag). A 3-second
   // "hello, no thanks" is answered, not a conversation.
   const isConv=det=>/\d+h\s/.test(det||"")||(+((det||"").match(/(\d+)m\s/)||[])[1]>=2);
+  // emails split honestly: a mail WE sent is work (by_user is set on outbound),
+  // a mail a lead sent back is a reply received, not our output
+  let repliesIn=0;
   LEADS.forEach(l=>{
     l.logs.forEach(g=>{
       const d=day(String(g.at).slice(0,10)); if(!d||d<since) return;
@@ -2818,7 +3130,7 @@ function weekStats(){
         if(!/not reached/i.test(g.detail||"")) row(u).answered++;
         if(isConv(g.detail)) row(u).conv++; }
       else if(g.kind==="wa") row(u).wa++;
-      else if(g.kind==="email") row(u).emails++;
+      else if(g.kind==="email"){ if(g.by_user) row(u).emails++; else repliesIn++; }
       else if(g.kind==="meeting") row(u).meetings++;
     });
     l.notes.forEach(n=>{ const d=day(n.d); if(d&&d>=since) row(n.by||"team").notes++; });
@@ -2826,7 +3138,7 @@ function weekStats(){
   const newLeads=LEADS.filter(l=>!l.internal && l.created && l.created>=since).length;
   const won=LEADS.filter(l=>l.client && l.client.first_paid_at && new Date(l.client.first_paid_at)>=since).length;
   const tickets=(window.__tickets||[]).filter(t=>new Date(t.opened_at)>=since).length;
-  return {per, newLeads, won, tickets, since};
+  return {per, newLeads, won, tickets, since, repliesIn};
 }
 
 /* health of one data source: newest run wins, and a source that has not succeeded
@@ -2853,13 +3165,13 @@ function healthProblems(){
    or other drives get a config that actually works on their machine */
 window.mcpPath = () => {
   const el=document.getElementById("mcp-path"); if(!el) return;
-  const raw=(el.value||"").trim().replace(/[\\/]+$/,"") || "D:\\OrderCubeHub";
+  const raw=(el.value||"").trim().replace(/[\\/]+$/,"") || ORG().mcpFolder || "D:\\Hub";
   localStorage.setItem("hub_mcp_path", raw);
   const win = /^[a-zA-Z]:\\/.test(raw) || raw.includes("\\");
   const file = win ? raw+"\\mcp\\hub-mcp.js" : raw+"/mcp/hub-mcp.js";
-  const json = '{\n  "mcpServers": {\n    "ordercube-hub": {\n      "command": "node",\n      "args": ["'+(win?file.replace(/\\/g,"\\\\"):file)+'"]\n    }\n  }\n}';
+  const json = '{\n  "mcpServers": {\n    "hub": {\n      "command": "node",\n      "args": ["'+(win?file.replace(/\\/g,"\\\\"):file)+'"]\n    }\n  }\n}';
   const j=document.getElementById("mcp-json"); if(j) j.textContent=json;
-  const c=document.getElementById("mcp-cli"); if(c) c.textContent="claude mcp add ordercube-hub -- node "+file;
+  const c=document.getElementById("mcp-cli"); if(c) c.textContent="claude mcp add hub -- node "+file;
   const o=document.getElementById("mcp-os"); if(o) o.textContent = win ? "Windows path" : "Mac or Linux path";
 };
 /* connecting a mailbox: the password is encrypted here, in the browser, with the
@@ -2883,7 +3195,7 @@ window.mbConnect = () => {
     <input class="li" id="mb-email" placeholder="Mailbox address" value="${esc((mine&&mine.email)||ME||"")}">
     <input class="li" id="mb-pass" type="password" placeholder="Mail password (not your hub password)" autocomplete="new-password">
     <div class="acts">
-      <label class="chip">server <input class="li" id="mb-host" value="${esc((mine&&mine.host)||ORG().imapHost||"imap.strato.de")}" style="width:170px;padding:2px 6px"></label>
+      <label class="chip">server <input class="li" id="mb-host" value="${esc((mine&&mine.host)||ORG().imapHost||"")}" placeholder="imap.yourprovider.tld" style="width:170px;padding:2px 6px"></label>
       <label class="chip">port <input class="li" id="mb-port" type="number" value="${(mine&&mine.port)||993}" style="width:70px;padding:2px 6px"></label>
     </div>
     <div class="meta">The hub never marks your mail as read and never deletes anything: it only looks at who wrote to whom, the subject and a short preview.</div>
@@ -2900,10 +3212,11 @@ window.mbSave = async () => {
   const email=g("mb-email").toLowerCase(), pass=(document.getElementById("mb-pass")||{}).value||"";
   if(!/^\S+@\S+\.\S+$/.test(email)){ toast("Enter your mailbox address"); return; }
   if(!pass){ toast("Enter the mail password"); return; }
+  if(!g("mb-host")&&!ORG().imapHost){ toast("Enter the mail server (ask an admin if unsure)"); return; }
   let enc;
   try{ enc = await encryptForServer(pass); }
   catch(e){ hubAlert("Could not secure the password", esc(e.message)); return; }
-  const row={ email, owner_email:ME, host:g("mb-host")||"imap.strato.de", port:parseInt(g("mb-port"),10)||993,
+  const row={ email, owner_email:ME, host:g("mb-host")||ORG().imapHost||"", port:parseInt(g("mb-port"),10)||993,
     pass_enc:enc, active:true, ok:null, error:null, updated_at:new Date().toISOString() };
   const {error}=await sb.from("mailboxes").upsert(row);
   if(error){ hubAlert("Could not save", esc(error.message)+(/duplicate|policy/i.test(error.message)?"<br><br>That address may already be connected by someone else.":"")); return; }
@@ -2947,6 +3260,19 @@ async function boot(){
   const {data:{session}} = await sb.auth.getSession();
   if(!session){ document.getElementById("login").style.display="flex"; return; }
   ME = session.user.email;
+  // first arrival through an invite (or recovery) link: choose a password first
+  if(/type=invite|type=recovery/.test(BOOTHASH) && !window.__pwSet){
+    let pw="";
+    while(pw.length<8){
+      const v=await hubDialog({title:"Welcome 👋 Set your password",
+        body:"You are signed in as "+esc(ME)+". Choose the password you will use from now on (at least 8 characters).",
+        input:"password", okLabel:"Set my password", noCancel:true});
+      pw=String(v||"").trim();
+    }
+    const {error:pe}=await sb.auth.updateUser({password:pw});
+    if(pe) await hubAlert("Could not set the password", esc(pe.message)+"<br>You are still signed in; set it again in Settings → Account.");
+    else { window.__pwSet=true; try{ history.replaceState(null,"",location.pathname+location.search); }catch(e){} toast("Password set ✓"); }
+  }
   try {
     const {data:prof} = await sb.from("app_users").select("*").eq("email", ME).maybeSingle();
     window.PROFILE = prof || {role:"viewer", can_write:false, tabs:["today","fresh","followups","funnel","people"]};
