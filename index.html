@@ -44,6 +44,14 @@ nav{width:210px;flex:none;border-right:1px solid var(--border);padding:16px 10px
 .navbtn .cnt{font-size:11px;background:var(--surface);border:1px solid var(--border);border-radius:99px;padding:1px 7px;color:var(--ink2)}
 .navfoot{margin-top:auto;padding:10px;font-size:11px;color:var(--muted)}
 .navfoot a{cursor:pointer}
+/* the footer toolbar: three quiet icon buttons, then account, then data state */
+.navfoot .nfrow{display:flex;gap:4px;margin-bottom:6px}
+.nficon{position:relative;width:28px;height:28px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;color:var(--ink2)}
+.nficon:hover{background:var(--chipbg);color:var(--ink)}
+.nficon .bdg{position:absolute;top:-2px;right:-2px;background:var(--crit);color:#fff;font-size:9px;font-weight:600;border-radius:99px;padding:0 4px;line-height:13px;min-width:13px;text-align:center}
+.nfacct{display:block;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;max-width:186px}
+.nfacct:hover{color:var(--ink)}
+.nfact{display:inline-flex;align-items:center;gap:3px;vertical-align:middle}
 main{flex:1;padding:20px 24px;max-width:1060px}
 header.top{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
 header.top h1{font-size:18px;margin:0}
@@ -2198,6 +2206,14 @@ window.uDel=async em=>{
 
 /* ---------- shell ---------- */
 let CURRENT="today";
+/* inline icons (stroke follows the text color, so they theme themselves) */
+const ICN={
+  bell:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>',
+  moon:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
+  sliders:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>',
+  zap:'<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+  refresh:'<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>',
+};
 /* Rendering is defensive: one broken panel or counter can never blank the page.
    Errors draw an error card with a copy button instead. */
 function errCard(where, err){
@@ -2231,16 +2247,18 @@ function render(){
           else if(!mb && !shared && STATS.mailboxKey) lines.push(`<a onclick="go('settings')" style="color:var(--serious)" title="Your own mails with leads and customers are missing from the hub until you connect">⚠ connect your mailbox</a>`);
           return lines.length?lines.join("<br>")+"<br>":"";
         }catch(e){return "";}})()}
-        <a onclick="cycleTheme()" title="Switch between auto (follows your system), light and dark">◐ Theme: ${localStorage.getItem("hub_theme")||"auto"}</a><br>
-        <a onclick="go('settings')" title="Open settings">⚙️ ${esc(ME||"Settings")}</a>${(()=>{try{
-          const rems=(window.__rems||[]).filter(r=>!r.done_at);
-          const due=rems.filter(r=>day(r.due)&&day(r.due)<=TODAY);
-          const KI={sales:"✦",support:"🎫",ops:"🔧"};
-          const b=["sales","support","ops"].map(k=>[KI[k],due.filter(r=>r.kind===k).length]).filter(x=>x[1]).map(([ic,n])=>n+ic).join(" ");
-          return ` <a onclick="remList()" title="Your reminders${due.length?": "+due.length+" due now":rems.length?": "+rems.length+" upcoming":""} (✦ people, 🎫 tickets, 🔧 operations)" style="${due.length?"color:var(--crit);font-weight:600":""}">🔔${b?" "+b:""}</a>`;
-        }catch(e){return "";}})()}<br>
-        <span title="When a sync engine last wrote data into the hub. The page keeps itself up to date on its own.">Data: ${(()=>{try{const r=(window.__syncRuns||[])[0]; const d=r?r.ran_at:STATS.refreshedAt; return d? new Date(d).toLocaleString(undefined,{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"?";}catch(e){return "?";}})()}</span>
-        ${window.CANW!==false?`<br><a onclick="syncNow()" title="Go and fetch new data from Salesforce, the mailboxes, Stripe, Placetel and the coupon panel right now, instead of waiting for the next half-hour run">⚡ Sync now</a> · `:"<br>"}<a onclick="refreshData()" title="Show the newest data that is already in the hub (happens automatically every few minutes anyway)">⟳ reload</a></div>`;
+        <div class="nfrow">
+          ${(()=>{try{
+            const rems=(window.__rems||[]).filter(r=>!r.done_at);
+            const due=rems.filter(r=>day(r.due)&&day(r.due)<=TODAY).length;
+            return `<a class="nficon" onclick="remList()" title="Reminders${due?": "+due+" due now":rems.length?": "+rems.length+" upcoming":""}">${ICN.bell}${due?`<span class="bdg">${due}</span>`:""}</a>`;
+          }catch(e){return `<a class="nficon" onclick="remList()" title="Reminders">${ICN.bell}</a>`;}})()}
+          <a class="nficon" onclick="cycleTheme()" title="Theme: ${localStorage.getItem("hub_theme")||"auto"} · click to switch light / dark / auto">${ICN.moon}</a>
+          <a class="nficon" onclick="go('settings')" title="Settings">${ICN.sliders}</a>
+        </div>
+        <a class="nfacct" onclick="go('settings')" title="Signed in · click for settings">${esc(ME||"Settings")}</a>
+        <span title="When a sync engine last wrote data into the hub. The page keeps itself up to date on its own.">Data: ${(()=>{try{const r=(window.__syncRuns||[])[0]; const d=r?r.ran_at:STATS.refreshedAt; return d? new Date(d).toLocaleString(undefined,{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"?";}catch(e){return "?";}})()}</span><br>
+        ${window.CANW!==false?`<a class="nfact" onclick="syncNow()" title="Fetch new data from every source right now instead of waiting for the next run">${ICN.zap} Sync now</a> · `:""}<a class="nfact" onclick="refreshData()" title="Show the newest data already in the hub (happens automatically every few minutes anyway)">${ICN.refresh} reload</a></div>`;
   }catch(e){ console.error("nav failed:", e); }
   try{ document.getElementById("title").textContent=PANELS[CURRENT].title; }catch(e){}
   try{ if(ORG().brand) document.title=ORG().brand; }catch(e){}
