@@ -423,7 +423,8 @@ const JLOC_SEL = "key,summary,phase,client_number,company,contact_name,contact_e
   "person_id,client_id,match_via,manual_payer,jira_updated,updated_at";
 const JKID_SEL = "key,parent_key,client_number,project,issue_type,ticket_type,status,summary,tracking_link,"+
   "tracking_number,delivery_service,date_shipment,date_receipt,scheduled_delivery,questionnaire_sent,"+
-  "questionnaire_filled,jira_created,jira_resolved,jira_updated,updated_at";
+  "questionnaire_filled,jira_created,jira_resolved,jira_updated,updated_at,"+
+  "company,contact_name,contact_email,phone,person_id";
 const upsertRows = (arr, rows, key) => {
   if(!rows || !rows.length) return arr;
   const ix = new Map(arr.map((r,i)=>[r[key],i]));
@@ -454,6 +455,9 @@ async function loadData(delta){
     canDelta ? sb.from("jira_children").select(JKID_SEL).gt("updated_at", RAW.mark.jkids||"").limit(1000)
              : sb.from("jira_children").select(JKID_SEL).is("jira_resolved",null)
                  .not("status","in",'("DELIVERED","CANCELED","LOST / RETURNED","RK_CLOSED","Done")').limit(2000),
+    // orphan children matched straight to a person load even when closed:
+    // a delivered shipment is exactly what the card should show for a new client
+    sb.from("jira_children").select(JKID_SEL).is("parent_key",null).not("person_id","is",null).limit(500),
     sb.from("payment_problems").select("*").order("invoice_created",{ascending:false}).limit(500),
     canDelta ? sb.from("jira_comments").select("*").gt("id", RAW.mark.jcom||0).order("id").limit(300)
              : sb.from("jira_comments").select("*").order("id",{ascending:false}).limit(300),
@@ -462,7 +466,7 @@ async function loadData(delta){
   ]);
   const [{data:statRows, error:e3},{data:runRows},{data:ticketRows},{data:userRows},
          {data:umailRows},{data:ucallRows},{data:creqRows},{data:mbRows},{data:auditRows},
-         {data:jlocRows},{data:jkidRows},{data:ppRows},{data:jcomRows},{data:ohRows},{data:remRows}] = small;
+         {data:jlocRows},{data:jkidRows},{data:jorphRows},{data:ppRows},{data:jcomRows},{data:ohRows},{data:remRows}] = small;
   window.__rems = remRows||window.__rems||[];
 
   let e1=null, e2=null, e4=null;
@@ -529,6 +533,7 @@ async function loadData(delta){
   } else {
     RAW.jloc = jlocRows||[]; RAW.jkids = jkidRows||[]; RAW.jcom = (jcomRows||[]).reverse();
   }
+  upsertRows(RAW.jkids, jorphRows, "key");
   RAW.mark.jloc = maxOf(RAW.jloc,"updated_at") || RAW.mark.jloc || "";
   RAW.mark.jkids = maxOf(RAW.jkids,"updated_at") || RAW.mark.jkids || "";
   RAW.mark.jcom = RAW.jcom.reduce((m,r)=>Math.max(m, r.id||0), 0);
@@ -760,6 +765,19 @@ function locsFor(l){
   const seen=new Set(direct.map(x=>x.key));
   return [...direct, ...viaClient.filter(x=>!seen.has(x.key))];
 }
+/* shipments/service with NO location ticket anywhere in Jira: matched straight
+   to the person (server match by id, plus email/phone here for fresh rows) */
+function orphanKidsFor(l){
+  const ems=[l.email,l.alt,l.client&&l.client.email].filter(Boolean).map(e=>e.toLowerCase());
+  const ph9=[l.phone,l.altPhone].filter(Boolean).map(p=>digits(p).slice(-9)).filter(d=>d.length===9);
+  return (RAW.jkids||[]).filter(k=>{
+    if(k.parent_key) return false;
+    if(k.person_id) return k.person_id===l.id;
+    if(k.contact_email && ems.includes(String(k.contact_email).toLowerCase())) return true;
+    const kd=digits(k.phone||"").slice(-9);
+    return kd.length===9 && ph9.includes(kd);
+  }).sort((a,b)=>String(b.jira_created||"").localeCompare(String(a.jira_created||"")));
+}
 /* payment problems of a person, matched over every email we know for them */
 function ppOf(l){
   const ems=[l.email,l.alt,l.client&&l.client.email].filter(Boolean).map(e=>e.toLowerCase());
@@ -771,7 +789,7 @@ const jiraLink = key => ORG().jiraUrl ? `<a class="sflink" href="${esc(ORG().jir
 function upsLink(kid, loc){
   // the phone prefix decides: Jira's Language field is often left on DE even
   // for US customers (seen on real tickets), the number does not lie
-  const ph=((loc&&loc.phone)||"").replace(/[\s-]/g,"");
+  const ph=((loc&&loc.phone)||kid.phone||"").replace(/[\s-]/g,"");
   const dach=ph?/^(\+|00)(49|43|41)/.test(ph):(loc&&loc.language)==="DE";
   const want=dach?"de_DE":"en_EN";
   if(kid.tracking_link) return kid.tracking_link.replace(/([?&]loc=)[A-Za-z_]+/,"$1"+want);
@@ -803,7 +821,8 @@ window.jxOpen = async key => {
 /* the Locations block on a person card: one row per CS ticket, expandable */
 function locBlock(l){
   const locs=locsFor(l);
-  if(!locs.length) return "";
+  const orphans=orphanKidsFor(l);
+  if(!locs.length && !orphans.length) return "";
   const row=j=>{
     const kids=((window.__kidsByParent||{})[j.key]||[]);
     const ships=kids.filter(k=>k.project==="SH").sort((a,b)=>String(b.jira_created||"").localeCompare(String(a.jira_created||"")));
@@ -842,10 +861,17 @@ function locBlock(l){
         ${coms.length?`Comments (from Jira mails):<br>${coms.slice(0,6).map(cm=>`&nbsp;&nbsp;💬 <span class="meta">${esc(String(cm.at||"").slice(0,10))} ${esc(cm.author||"")}</span> ${esc((cm.body||"").slice(0,200))}`).join("<br>")}`:""}
       </div></details>`;
   };
+  // shipments/service that exist in Jira without any CS location yet: show the
+  // work itself instead of hiding it behind a missing epic
+  const orow=k=>`<div class="meta" style="padding:2px 2px">${k.project==="SH"?"📦":"🔧"} ${esc(k.summary||k.key)} · ${esc(k.status||"")}${k.date_shipment?" · shipped "+dstr(k.date_shipment):""}${k.date_receipt?" · received "+dstr(k.date_receipt):""}
+      ${upsLink(k,null)?`<a class="sflink" href="${esc(upsLink(k,null))}" target="_blank">${esc(k.delivery_service||"track")} ↗</a>`:""} ${jiraLink(k.key)}
+      ${k.questionnaire_sent&&!k.questionnaire_filled?`<span class="chip" style="color:var(--serious)">questionnaire not filled since ${dstr(k.questionnaire_sent)}</span>`:""}</div>`;
   return `<div style="width:100%" onclick="event.stopPropagation()" id="locs-${l.id}">
-    <div class="meta" style="margin:4px 0 2px">Locations (${locs.length})
+    ${locs.length?`<div class="meta" style="margin:4px 0 2px">Locations (${locs.length})
       ${window.CANW!==false?`<span class="chip jump" onclick="linkLocation('${l.id}')" title="Attach another Jira location to this person (a chain owner has several)">🔗 link another…</span>`:""}
-    </div>${locs.map(row).join("")}</div>`;
+    </div>${locs.map(row).join("")}`:""}
+    ${orphans.length?`<div class="meta" style="margin:4px 0 2px">${locs.length?"Also in Jira, not under any location yet":"In Jira, no location ticket yet"} (${orphans.length})</div>
+    ${orphans.slice(0,8).map(orow).join("")}`:""}</div>`;
 }
 /* attach a Jira location to a person by hand (Soho Vibes belongs to Terrance,
    but its ticket uses a different email, so no rule can know) */
@@ -910,14 +936,14 @@ function opsItems(){
     const qk=dFrom(k.jira_updated)>30;   // untouched in Jira for a month: probably done, just never closed
     if(k.project==="RK"&&kidOpen(k)){
       out.push({id:"service:"+k.key, quiet:qk, kind:"service", icon:"🔧", our:k.status!=="RK_DELIVERY_WAITING", age:dFrom(k.jira_created),
-        title:(k.summary||k.key)+" · "+(k.status||""), who:j?personLoc(j):esc(k.summary||k.key), key:k.key, loc:j});
+        title:(k.summary||k.key)+" · "+(k.status||""), who:j?personLoc(j):esc(k.summary||k.key), key:k.key, loc:j, kid:k});
     }
     if(k.project==="SH"&&kidOpen(k)){
       out.push({id:"shipment:"+k.key, quiet:qk, kind:"shipment", icon:"📦", our:k.status==="DATA VALIDATION", age:dFrom(k.date_shipment||k.jira_created),
         title:(k.status||"open")+(k.date_shipment?" · shipped "+dstr(k.date_shipment):""), who:j?personLoc(j):esc(k.summary||k.key), key:k.key, loc:j, kid:k});
       if(k.questionnaire_sent&&!k.questionnaire_filled)
         out.push({id:"questionnaire:"+k.key, quiet:qk, kind:"questionnaire", icon:"📋", our:dFrom(k.questionnaire_sent)>7, age:dFrom(k.questionnaire_sent),
-          title:"questionnaire sent "+dstr(k.questionnaire_sent)+", not filled", who:j?personLoc(j):esc(k.summary||k.key), key:k.key, loc:j});
+          title:"questionnaire sent "+dstr(k.questionnaire_sent)+", not filled", who:j?personLoc(j):esc(k.summary||k.key), key:k.key, loc:j, kid:k});
     }
   }
   for(const p of (window.__pprobs||[])){
@@ -1008,6 +1034,7 @@ function phead(l){
     ${l.client?`<span class="chip jump life-client" onclick="jumpSearch('clients','${esc(l.client.email||l.email||l.name)}')" title="Open in Clients">💰 ${esc(eur(l.client.total_paid,l.client.currency))} · ${l.client.payments}× paid →</span>`:""}
     ${ppOf(l).length?`<span class="chip jump" style="color:var(--crit)" onclick="go('ops');window.__OPS={kind:'payment'}" title="${esc(ppOf(l).map(p=>Math.round(p.amount/100)+"€ · "+(p.reason||p.status)).join(" · "))}">⚠ ${ppOf(l).length} failed payment${ppOf(l).length>1?"s":""} →</span>`:""}
     ${locsFor(l).length?`<span class="chip jump" onclick="document.getElementById('locs-${l.id}')?.scrollIntoView({behavior:'smooth'})" title="Contracts, shipments and service from Jira">📍 ${locsFor(l).length} location${locsFor(l).length>1?"s":""}</span>`:""}
+    ${!locsFor(l).length&&orphanKidsFor(l).length?`<span class="chip jump" onclick="document.getElementById('locs-${l.id}')?.scrollIntoView({behavior:'smooth'})" title="Shipments or service tickets in Jira that have no location ticket yet">📦 ${orphanKidsFor(l).length} in Jira</span>`:""}
     ${openT?`<span class="chip jump" onclick="jumpSearch('support','${esc(l.email||l.name)}')" title="Open their tickets in Support">🎫 ${openT} open →</span>`:""}
     ${actC?`<span class="chip jump coupon" onclick="jumpSearch('coupons','${esc(l.email||l.name)}')" title="Open in Coupons">🎟 ${actC} active →</span>`:""}
     ${window.CANW!==false?`<span class="chip jump" onclick="newTicket('${l.id}')" title="Open a support ticket for this person">🎫 ＋ ticket</span>
@@ -1901,7 +1928,8 @@ const PANELS = {
       const ours=live.filter(i=>i.our&&!i.quiet), theirs=live.filter(i=>!i.our&&!i.quiet), quiet=live.filter(i=>i.quiet);
       const cnt=k=>{const a=(k==="all"?all:all.filter(i=>i.kind===k)).filter(i=>!H.has(i.id)&&!i.quiet); return a.length;};
       const row=i=>{
-        const person=i.loc&&i.loc.person_id&&byId[i.loc.person_id];
+        const person=(i.loc&&i.loc.person_id&&byId[i.loc.person_id])
+          || (i.kid&&i.kid.person_id&&byId[i.kid.person_id]);   // orphan child matched straight to a person
         const openAct=person?`openPerson('${person.id}')`:(i.email?`jumpSearch('people','${esc(i.email)}')`:"");
         const hid=H.has(i.id);
         return `<div class="card"><div class="row" ${openAct?`onclick="${openAct}"`:'style="cursor:default"'}>
