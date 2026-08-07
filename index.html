@@ -954,11 +954,17 @@ function opsItems(){
           title:"questionnaire sent "+dstr(k.questionnaire_sent)+", not filled", who:j?personLoc(j):esc(k.summary||k.key), key:k.key, loc:j, kid:k});
     }
   }
+  const cliByStripe={}; (window.__clients||[]).forEach(c2=>{ if(c2.stripe_id) cliByStripe[c2.stripe_id]=c2; });
   for(const p of (window.__pprobs||[])){
+    // a payment AFTER this invoice was created usually means they settled it
+    // through a newer invoice: the old one is probably stale, void it in Stripe
+    const cl2=p.stripe_customer&&cliByStripe[p.stripe_customer];
+    const paidSince=!!(cl2&&cl2.last_paid_at&&p.invoice_created&&new Date(cl2.last_paid_at)>new Date(p.invoice_created));
     out.push({id:"payment:"+p.invoice_id, quiet:dFrom(p.invoice_created)>60, kind:"payment", icon:"💳", our:true, age:dFrom(p.invoice_created),
       title:Math.round((p.amount||0)/100)+"€ "+(p.status==="uncollectible"?"uncollectible":"unpaid")
         +(p.attempts?" · "+p.attempts+" attempt"+(p.attempts>1?"s":""):"")
         +(p.next_retry?" · retry "+new Date(p.next_retry).toLocaleDateString():"")
+        +(paidSince?" · 💰 paid again since this invoice, probably superseded":"")
         +(p.reason?" · "+p.reason.slice(0,80):""),
       who:esc(p.name||p.email||"?"), email:p.email, pp:p});
   }
@@ -1924,11 +1930,12 @@ const PANELS = {
       const all=opsItems(), H=window.__opsHidden||new Map();
       const KINDS=[["all","Everything"],["payment","💳 Payments"],["service","🔧 Service"],["shipment","📦 Shipments"],
         ["questionnaire","📋 Questionnaires"],["test","🧪 Test periods"],["renewal","🔄 Renewals"],["check","⚖ Checks"]];
-      const so=(window.__SORTX||{}).ops||"age";
+      const so=(window.__SORTX||{}).ops||"new";
       const arr=(O.kind==="all"?all:all.filter(i=>i.kind===O.kind)).sort(
         so==="amount"?(a,b)=>(((b.pp||{}).amount)||0)-(((a.pp||{}).amount)||0)
         :so==="attempts"?(a,b)=>(((b.pp||{}).attempts)||0)-(((a.pp||{}).attempts)||0)
-        :(a,b)=>b.age-a.age);
+        :so==="old"?(a,b)=>b.age-a.age
+        :(a,b)=>a.age-b.age);
       const q=(document.getElementById("q").value||"").toLowerCase().trim();
       const shown=q?arr.filter(i=>(i.who+" "+i.title+" "+(i.key||"")+" "+(i.email||"")).toLowerCase().includes(q)):arr;
       const hidden=shown.filter(i=>H.has(i.id));
@@ -1954,7 +1961,7 @@ const PANELS = {
       };
       return `<p class="hint">What is actually moving right now, read from Jira and Stripe. Anything untouched for 30+ days folds into "quiet" below: still open in the source, probably finished in reality. ✓ marks an item not active by hand (Jira is never touched). Unpaid right now: ${Math.round((window.__pprobs||[]).reduce((a,p)=>a+(p.amount||0),0)/100).toLocaleString()}€.</p>
       <div class="filters">${KINDS.map(([k,lb])=>`<button class="fbtn ${O.kind===k?'active':''}" onclick="window.__OPS.kind='${k}';render()">${lb} ${cnt(k)?"("+cnt(k)+")":""}</button>`).join("")}
-        ${sortSelX("ops",[["age","Sort: oldest first"],["amount","Sort: highest amount (payments)"],["attempts","Sort: most attempts (payments)"]],"age")}</div>
+        ${sortSelX("ops",[["new","Sort: newest first"],["old","Sort: oldest first"],["amount","Sort: highest amount (payments)"],["attempts","Sort: most attempts (payments)"]],"new")}</div>
       <h2>Our move (${ours.length})</h2>
       ${ours.map(row).join("")||'<div class="empty">Nothing waiting on us 🎉</div>'}
       <details class="tbl"><summary>⏳ Waiting on others (${theirs.length}): customers, carriers, banks</summary>
