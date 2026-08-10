@@ -274,7 +274,13 @@ const TZ = {"1":["US","America/New_York"],"20":["EG","Africa/Cairo"],"212":["MA"
 "86":["CN","Asia/Shanghai"],"90":["TR","Europe/Istanbul"],"91":["IN","Asia/Kolkata"],
 "92":["PK","Asia/Karachi"],"962":["JO","Asia/Amman"],"965":["KW","Asia/Kuwait"],
 "966":["SA","Asia/Riyadh"],"968":["OM","Asia/Muscat"],"971":["AE","Asia/Dubai"],
-"973":["BH","Asia/Bahrain"],"974":["QA","Asia/Qatar"]};
+"973":["BH","Asia/Bahrain"],"974":["QA","Asia/Qatar"],
+"32":["BE","Europe/Brussels"],"41":["CH","Europe/Zurich"],"352":["LU","Europe/Luxembourg"],
+"36":["HU","Europe/Budapest"],"40":["RO","Europe/Bucharest"],"420":["CZ","Europe/Prague"],
+"421":["SK","Europe/Bratislava"],"359":["BG","Europe/Sofia"],"385":["HR","Europe/Zagreb"],
+"386":["SI","Europe/Ljubljana"],"372":["EE","Europe/Tallinn"],"371":["LV","Europe/Riga"],
+"852":["HK","Asia/Hong_Kong"],"886":["TW","Asia/Taipei"],"972":["IL","Asia/Jerusalem"],
+"54":["AR","America/Argentina/Buenos_Aires"],"56":["CL","America/Santiago"]};
 const CA_AREAS = new Set(["204","226","236","249","250","263","289","306","343","354","365","367","368",
 "382","403","416","418","428","431","437","438","450","468","474","506","514","519","548","579","581",
 "584","587","604","613","639","647","672","683","705","709","742","753","778","780","782","807","819",
@@ -282,7 +288,15 @@ const CA_AREAS = new Set(["204","226","236","249","250","263","289","306","343",
 function tzInfo(phone){
   if(!phone) return null;
   let p = phone.replace(/[^\d+]/g,"");
-  if(p.startsWith("00")) p = p.slice(2); else if(p.startsWith("+")) p = p.slice(1); else return null;
+  if(p.startsWith("00")) p = p.slice(2);
+  else if(p.startsWith("+")) p = p.slice(1);
+  else if(/^[2-9]\d{9}$/.test(p)){
+    // bare 10-digit national number like 914-417-5633: unambiguously US/CA.
+    // No European number written without its leading 0 can look like this
+    // (their mobiles then start with 1x, and NANP area codes never do).
+    return CA_AREAS.has(p.slice(0,3)) ? ["CA","America/Toronto"] : ["US","America/New_York"];
+  }
+  else return null;
   for(const len of [3,2,1]){ const c=p.slice(0,len);
     if(TZ[c]){
       if(c==="1") return CA_AREAS.has(p.slice(1,4)) ? ["CA","America/Toronto"] : ["US","America/New_York"];
@@ -297,11 +311,14 @@ IT:"Italy",NL:"Netherlands",PL:"Poland",LT:"Lithuania",MT:"Malta",CY:"Cyprus",GR
 PE:"Peru",CO:"Colombia",MX:"Mexico",BR:"Brazil",QA:"Qatar",BH:"Bahrain",AE:"UAE",SG:"Singapore",
 AU:"Australia",NZ:"New Zealand",EG:"Egypt",MA:"Morocco",TN:"Tunisia",ZA:"South Africa",JO:"Jordan",
 KW:"Kuwait",SA:"Saudi Arabia",OM:"Oman",IN:"India",PK:"Pakistan",JP:"Japan",KR:"Korea",CN:"China",
-MY:"Malaysia",ID:"Indonesia",PH:"Philippines",TH:"Thailand","?":"Unknown"};
+MY:"Malaysia",ID:"Indonesia",PH:"Philippines",TH:"Thailand",BE:"Belgium",LU:"Luxembourg",
+HU:"Hungary",RO:"Romania",CZ:"Czechia",SK:"Slovakia",BG:"Bulgaria",HR:"Croatia",SI:"Slovenia",
+EE:"Estonia",LV:"Latvia",HK:"Hong Kong",TW:"Taiwan",IL:"Israel",AR:"Argentina",CL:"Chile","?":"Unknown"};
 const flag = cc => cc==="?" ? "❓" : String.fromCodePoint(...[...(cc==="UK"?"GB":cc.slice(0,2))].map(c=>127397+c.charCodeAt(0)));
 const TLD_CC = {de:"DE",at:"AT",ch:"CH",uk:"UK",ie:"IE",fr:"FR",it:"IT",es:"ES",pt:"PT",nl:"NL",
   pl:"PL",se:"SE",no:"NO",dk:"DK",fi:"FI",cy:"CY",gr:"GR",tr:"TR",lt:"LT",mt:"MT",sg:"SG",
-  bh:"BH",qa:"QA",ae:"AE",au:"AU",nz:"NZ",ca:"CA",us:"US"};
+  bh:"BH",qa:"QA",ae:"AE",au:"AU",nz:"NZ",ca:"CA",us:"US",be:"BE",cz:"CZ",ro:"RO",hu:"HU",
+  hr:"HR",si:"SI",sk:"SK",bg:"BG",ee:"EE",lv:"LV",lu:"LU",il:"IL",hk:"HK",tw:"TW",ar:"AR",cl:"CL"};
 function localHour(zone){
   try { return +new Intl.DateTimeFormat("en-GB",{timeZone:zone,hour:"2-digit",hour12:false}).format(new Date()); }
   catch(e){ return null; }
@@ -352,8 +369,40 @@ window.toggleCC = cc => {
   set.has(cc) ? set.delete(cc) : set.add(cc);
   VIEW.extra = [...set]; saveView(); render(false);
 };
+/* the base population the CURRENT tab works with: filter counts must describe
+   this tab, not the whole hub (a client is not a follow-up) */
+function tabPool(){
+  try{
+    switch(CURRENT){
+      case "today":     return [...new Set([...dueToday(),...goneQuiet(),...couponsExpiring(),...planned()])];
+      case "fresh":     return [...newLeads(),...attemptedL()];
+      case "followups": return followups();
+      case "coupons":   return coupons();
+      default:          return LEADS.filter(l=>!l.internal);   // funnel: whole market, on purpose
+    }
+  }catch(e){ return LEADS.filter(l=>!l.internal); }
+}
+/* country counts for the chips: this tab's pool, after the OTHER active
+   filters (date range, callable), before the country choice itself. Countries
+   that exist in the hub but not in this view stay visible with a 0. */
+function facetCounts(){
+  let pool;
+  if(CURRENT==="clients")
+    pool=(window.__clients||[]).map(cl=>({cc:ccOfClient(cl), created:cl.first_paid_at?day(String(cl.first_paid_at).slice(0,10)):null, phone:null}));
+  else pool=tabPool();
+  const rb=rangeBounds();
+  let cp=pool.filter(l=>!rb || (l.created && (!rb.from||l.created>=rb.from) && (!rb.to||l.created<=rb.to)));
+  if(VIEW.callable && CURRENT!=="clients") cp=cp.filter(l=>{const c=callable(l); return c&&c.ok;});
+  const counts={};
+  try{
+    LEADS.filter(l=>!l.internal).forEach(l=>{ if(!(l.cc in counts)) counts[l.cc]=0; });
+    (window.__clients||[]).forEach(cl=>{ const k=ccOfClient(cl); if(!(k in counts)) counts[k]=0; });
+  }catch(e){}
+  cp.forEach(l=>counts[l.cc]=(counts[l.cc]||0)+1);
+  return counts;
+}
 function viewbar(){
-  const counts={}; LEADS.filter(l=>!l.internal).forEach(l=>counts[l.cc]=(counts[l.cc]||0)+1);
+  const counts=facetCounts();
   const set=activeCountries();
   const all=Object.keys(counts).length;
   const shown=Object.keys(counts).filter(c=>set.has(c)).length;
@@ -361,8 +410,8 @@ function viewbar(){
   const chips = !VIEW.showCC ? "" : `<div class="filters">
     <button class="fbtn" onclick="ccSelectAll()">✓ Select all</button>
     <button class="fbtn" onclick="ccSelectNone()">✗ None</button>`+
-    Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([cc,n])=>
-    `<button class="fbtn ${set.has(cc)?'active':''}" onclick="toggleCC('${cc}')" title="Click to show/hide this country">${flag(cc)} ${esc(CC_NAME[cc]||cc)} · ${n}</button>`).join("")+`</div>`;
+    Object.entries(counts).sort((a,b)=>b[1]-a[1]||String(a[0]).localeCompare(String(b[0]))).map(([cc,n])=>
+    `<button class="fbtn ${set.has(cc)?'active':''}" ${n?"":'style="opacity:.45"'} onclick="toggleCC('${cc}')" title="${n} on this tab with the current filters · click to show/hide this country">${flag(cc)} ${esc(CC_NAME[cc]||cc)} · ${n}</button>`).join("")+`</div>`;
   return `<div class="filters" style="margin-bottom:4px">
       <button class="fbtn ${VIEW.showCC?'active':''}" onclick="toggleCCPanel()">🌍 Countries ${shown}/${all} ${VIEW.showCC?"▴":"▾"}</button>
       <button class="fbtn ${VIEW.callable?'active':''}" onclick="toggleCallable()">☎ Callable now</button>
@@ -471,11 +520,13 @@ async function loadData(delta){
              : sb.from("jira_comments").select("*").order("id",{ascending:false}).limit(300),
     sb.from("ops_hidden").select("*"),
     sb.from("reminders").select("*").is("done_at",null).order("due").limit(300),
+    sb.from("company_groups").select("*").limit(500),
   ]);
   const [{data:statRows, error:e3},{data:runRows},{data:ticketRows},{data:userRows},
          {data:umailRows},{data:ucallRows},{data:creqRows},{data:mbRows},{data:auditRows},
-         {data:jlocRows},{data:jkidRows},{data:jorphRows},{data:ppRows},{data:jcomRows},{data:ohRows},{data:remRows}] = small;
+         {data:jlocRows},{data:jkidRows},{data:jorphRows},{data:ppRows},{data:jcomRows},{data:ohRows},{data:remRows},{data:grpRows}] = small;
   window.__rems = remRows||window.__rems||[];
+  window.__groupBy = Object.fromEntries((grpRows||[]).map(g=>[g.id,g]));
 
   let e1=null, e2=null, e4=null;
   if(!canDelta){
@@ -597,6 +648,8 @@ async function loadData(delta){
       cc: t ? t[0] : (TLD_CC[tld]||"?"),
       coupon: !!p.is_coupon_requester,
       createdBy: p.created_by||null,
+      gid: p.group_id||null,
+      covered: !!p.covered_at,
       internal: isInternal(p.email)
     };
     derive(l);
@@ -622,6 +675,12 @@ async function loadData(delta){
     if(!l.client && l.alt && cByEmail[l.alt.toLowerCase()]) l.client=cByEmail[l.alt.toLowerCase()];
   });
   LEADS.forEach(l=>{ if(l.client) derive(l); });   // clients become "Won" after linking
+  // country rescue: no readable phone and no useful email ending, but Stripe
+  // knows the card country of their client record
+  LEADS.forEach(l=>{ if(l.cc==="?" && l.client && l.client.country) l.cc = l.client.country==="GB"?"UK":l.client.country; });
+  // company groups: several PEOPLE under one company (never merged)
+  window.__groupMembers={};
+  LEADS.forEach(l=>{ if(l.gid) (window.__groupMembers[l.gid]=window.__groupMembers[l.gid]||[]).push(l.id); });
   // People completeness: humans the hub knows only from Stripe or support mail
   // get lightweight entries so the People tab really shows EVERYONE.
   const known=new Set();
@@ -647,6 +706,15 @@ async function loadData(delta){
   try{ saveSnapshot(); }catch(e){}
 }
 const eur = (cents,cur) => (Math.round((cents||0)/100)).toLocaleString("de-DE") + " " + ((cur||"eur").toUpperCase());
+/* a client's country: their lead card first, then the card country Stripe
+   reports, then the email ending as a last resort */
+function ccOfClient(cl){
+  const lead = cl.person_id && byId[cl.person_id];
+  if(lead) return lead.cc;
+  if(cl.country) return cl.country==="GB" ? "UK" : cl.country;
+  const tld=(cl.email||"").split(".").pop().toLowerCase();
+  return TLD_CC[tld]||"?";
+}
 const daysTo = d => Math.round((d - TODAY)/86400000);
 const expTxt = cp => { const n = daysTo(cp.exp); return n===0 ? "expires TODAY" : "expires in "+n+"d"; };
 
@@ -680,6 +748,7 @@ function leadRow(l, extra){
     (typeof fuGaveUp==="function"&&fuGaveUp(l))?'<span class="chip" title="Many attempts, never a real answer (give-up rule). Any new touch or real connect revives them.">👻</span>':"",
     l.due&&day(l.due)&&day(l.due)>TODAY?`<span class="chip" title="Personal reminder set: resurfaces then">⏰ ${day(l.due).toLocaleDateString(undefined,{day:"numeric",month:"short"})}</span>`:"",
     l.client?`<span class="chip coupon" title="Paying client · ${esc(eur(l.client.total_paid,l.client.currency))}">💰 client</span>`:"",
+    l.covered?'<span class="chip" title="Their company already pays; this lead sits out of the chase lists (change it in the 🏢 group on their card)">💰 covered</span>':"",
     l.cp?`<span class="chip coupon ${l.cp.offer?"jump":""}" title="${esc(l.cp.code)}${l.cp.offer?" · click to copy the offer link":""}" ${l.cp.offer?`onclick="copyTxt('${esc(l.cp.offer)}','offer link');event.stopPropagation()"`:""}>🎟 ${esc(l.cp.val)}${l.cp.offer?" 🔗":""}</span>`
       :(l.coupon?'<span class="chip coupon">Coupon</span>':(/Book a Call/i.test(l.src)?'<span class="chip call">Book-a-call</span>':"")),
     l.assigned?`<span class="chip asg" title="Lead owner: ${esc(l.assigned)}">👤 ${esc(String(l.assigned).split("@")[0])}</span>`
@@ -927,6 +996,109 @@ window.payerFlip = async (key,on) => {
   logAudit("manual-payer",{detail:key+" → "+(on?"pays outside Stripe":"pays via Stripe")});
   toast(on?"Marked: pays outside Stripe":"Marked: pays via Stripe"); render(false);
 };
+/* ---------- company groups: several people, one company; nobody merged ----------
+   Gardena case: an employee filled the lead form, the boss pays via Stripe.
+   Two humans, two cards, one rubber band. "Covered" is the only behavior:
+   a covered lead leaves every chase list (reversible, audited). */
+window.groupDialog = gid => {
+  const g=(window.__groupBy||{})[gid]; if(!g) return;
+  const ids=((window.__groupMembers||{})[gid]||[]);
+  let ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  ov=document.createElement("div"); ov.id="mergeov";
+  const pays=ids.some(id=>(byId[id]||{}).client);
+  const row=id=>{
+    const m=byId[id]; if(!m) return "";
+    return `<div class="row" style="cursor:default;gap:8px;padding:6px 0">
+      <span style="flex:1"><b>${esc(m.name||m.email||"?")}</b> <span class="meta">${esc(m.email||m.phone||"")}</span>
+        ${m.client?'<span class="chip life-client">💰 pays</span>':'<span class="chip life-lead">✦ lead</span>'}</span>
+      ${!m.client&&window.CANW!==false?`<label class="chip" style="cursor:pointer" title="On = the company's paying client already covers them: they leave every chase list. Off = still a target (e.g. a new location).">
+        <input type="checkbox" ${m.covered?"checked":""} onchange="coverFlip('${m.id}',this.checked)"> covered</label>`
+        :(m.covered?'<span class="chip">covered</span>':"")}
+      <button class="btn" onclick="document.getElementById('mergeov').remove();openPerson('${m.id}')">Open</button>
+      ${window.CANW!==false?`<button class="btn" onclick="ungroup('${m.id}')" title="Take them out of this group (nothing else changes)">✕</button>`:""}
+    </div>`;
+  };
+  ov.innerHTML=`<div class="mcard" style="width:560px">
+    <h3>🏢 ${esc(g.name)} <span class="meta">${ids.length} people${pays?" · has a paying client":""}</span></h3>
+    <div class="meta">One company, several people. Everyone keeps their own card; "covered" only decides whether a lead still shows up in the chase lists.</div>
+    ${ids.map(row).join("")||'<div class="meta">Empty group</div>'}
+    <div class="acts" style="justify-content:flex-end">
+      ${window.CANW!==false?`<button class="btn" onclick="groupAddMember(${gid})">＋ Add person</button>
+      <button class="btn" onclick="groupRename(${gid})">✏️ Rename</button>`:""}
+      <button class="btn" onclick="document.getElementById('mergeov').remove()">Close</button>
+    </div></div>`;
+  ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
+  document.body.appendChild(ov);
+};
+window.coverFlip = async (pid,on) => {
+  const l=byId[pid]; if(!l) return;
+  l.covered=!!on;
+  const {error}=await sb.from("people").update({covered_at:on?new Date().toISOString():null}).eq("id",pid);
+  if(error){ hubAlert("Save failed", esc(error.message)); l.covered=!on; return; }
+  logAudit("covered",{person_id:pid, detail:on?"covered by the company's client, out of the chase lists":"back in the chase lists"});
+  toast(on?"Covered: out of the chase lists":"Back in the chase lists");
+  render(false);
+};
+window.ungroup = async pid => {
+  const l=byId[pid]; if(!l||!l.gid) return;
+  const gid=l.gid;
+  const {error}=await sb.from("people").update({group_id:null}).eq("id",pid);
+  if(error){ hubAlert("Failed", esc(error.message)); return; }
+  l.gid=null;
+  window.__groupMembers[gid]=(window.__groupMembers[gid]||[]).filter(x=>x!==pid);
+  logAudit("group",{person_id:pid, detail:"removed from group"});
+  toast("Removed from the group"); render(false); groupDialog(gid);
+};
+window.groupRename = async gid => {
+  const g=(window.__groupBy||{})[gid]; if(!g) return;
+  const name=await hubPrompt("✏️ Rename this group", {value:g.name, okLabel:"Rename"});
+  if(!name||!String(name).trim()) return;
+  const nm=String(name).trim().slice(0,60);
+  const {error}=await sb.from("company_groups").update({name:nm}).eq("id",gid);
+  if(error){ hubAlert("Failed", esc(error.message)); return; }
+  g.name=nm; toast("Renamed"); render(false); groupDialog(gid);
+};
+window.groupAddMember = gid => {
+  pickPerson("🏢 Add whom to \""+esc(((window.__groupBy||{})[gid]||{}).name||"")+"\"?", async pid=>{
+    const {error}=await sb.from("people").update({group_id:gid}).eq("id",pid);
+    if(error){ hubAlert("Failed", esc(error.message)); return; }
+    const l=byId[pid]; if(l){ l.gid=gid; (window.__groupMembers[gid]=window.__groupMembers[gid]||[]).push(pid); }
+    logAudit("group",{person_id:pid, detail:"added to group "+(((window.__groupBy||{})[gid]||{}).name||gid)});
+    const ov=document.getElementById("mergeov"); if(ov) ov.remove();
+    toast("Added ✓"); render(false); groupDialog(gid);
+  });
+};
+window.groupCreate = async (name, ids) => {
+  const {data,error}=await sb.from("company_groups").insert({name:String(name).slice(0,60), created_by:ME}).select("*").single();
+  if(error){ hubAlert("Could not create the group", esc(error.message)); return; }
+  (window.__groupBy=window.__groupBy||{})[data.id]=data;
+  for(const pid of ids){
+    const {error:e2}=await sb.from("people").update({group_id:data.id}).eq("id",pid);
+    if(!e2){ const l=byId[pid]; if(l) l.gid=data.id; ((window.__groupMembers=window.__groupMembers||{})[data.id]=window.__groupMembers[data.id]||[]).push(pid); }
+  }
+  logAudit("group",{detail:"created group "+data.name+" with "+ids.length+" people"});
+  toast("Group created ✓"); render(false);
+  groupDialog(data.id);   // the covered toggles live here: decide right away
+};
+window.groupStart = pid => {
+  pickPerson("🏢 Same company as whom?", async other=>{
+    const a=byId[pid], b=byId[other]; if(!a||!b) return;
+    if(b.gid){   // they already have a group: join it instead of making a second one
+      const {error}=await sb.from("people").update({group_id:b.gid}).eq("id",pid);
+      if(error){ hubAlert("Failed", esc(error.message)); return; }
+      a.gid=b.gid; ((window.__groupMembers=window.__groupMembers||{})[b.gid]=window.__groupMembers[b.gid]||[]).push(pid);
+      logAudit("group",{person_id:pid, detail:"added to group"});
+      const ov=document.getElementById("mergeov"); if(ov) ov.remove();
+      render(false); groupDialog(b.gid); return;
+    }
+    const dm=e=>{const m=(e||"").toLowerCase().match(/@(.+)$/);return m?m[1]:null;};
+    const dflt=a.co||b.co||dm(a.email)||dm(b.email)||"Company";
+    const name=await hubPrompt("🏢 Company name for the group", {value:dflt, okLabel:"Create group"});
+    if(!name) return;
+    groupCreate(name, [pid, other]);
+  }, pid);
+};
+
 /* ---------- Operations: ONE list of everything operationally open ----------
    Each item: what, who, whose move it is, and how old. Computed fresh from the
    Jira mirror + Stripe problems; nothing is stored twice. */
@@ -1044,6 +1216,7 @@ function phead(l){
     </div>
     ${lchip}
     ${l.hub||l.stage?`<span class="chip stage">${esc(l.hub||l.stage)}</span>`:""}
+    ${l.gid&&(window.__groupBy||{})[l.gid]?`<span class="chip jump" onclick="groupDialog(${l.gid})" title="Company group: several people, one company. Click for members and the covered switch.">🏢 ${esc((window.__groupBy||{})[l.gid].name)} · ${((window.__groupMembers||{})[l.gid]||[]).length}${((window.__groupMembers||{})[l.gid]||[]).some(id=>(byId[id]||{}).client)?" · 💰 pays":""}</span>`:""}
     ${l.due&&day(l.due)&&day(l.due)>TODAY?`<span class="chip" title="Personal reminder set">⏰ ${day(l.due).toLocaleDateString(undefined,{day:"numeric",month:"short"})}</span>`:""}
     ${l.client?`<span class="chip jump life-client" onclick="jumpSearch('clients','${esc(l.client.email||l.email||l.name)}')" title="Open in Clients">💰 ${esc(eur(l.client.total_paid,l.client.currency))} · ${l.client.payments}× paid →</span>`:""}
     ${ppOf(l).length?`<span class="chip jump" style="color:var(--crit)" onclick="go('ops');window.__OPS={kind:'payment'}" title="${esc(ppOf(l).map(p=>Math.round(p.amount/100)+"€ · "+(p.reason||p.status)).join(" · "))}">⚠ ${ppOf(l).length} failed payment${ppOf(l).length>1?"s":""} →</span>`:""}
@@ -1051,7 +1224,8 @@ function phead(l){
     ${!locsFor(l).length&&orphanKidsFor(l).length?`<span class="chip jump" onclick="document.getElementById('locs-${l.id}')?.scrollIntoView({behavior:'smooth'})" title="Shipments or service tickets in Jira that have no location ticket yet">📦 ${orphanKidsFor(l).length} in Jira</span>`:""}
     ${openT?`<span class="chip jump" onclick="jumpSearch('support','${esc(l.email||l.name)}')" title="Open their tickets in Support">🎫 ${openT} open →</span>`:""}
     ${actC?`<span class="chip jump coupon" onclick="jumpSearch('coupons','${esc(l.email||l.name)}')" title="Open in Coupons">🎟 ${actC} active →</span>`:""}
-    ${window.CANW!==false?`<span class="chip jump" onclick="newTicket('${l.id}')" title="Open a support ticket for this person">🎫 ＋ ticket</span>
+    ${window.CANW!==false?`${!l.gid?`<span class="chip jump" onclick="groupStart('${l.id}')" title="Band this person together with a colleague at the same company (nothing is merged)">🏢 group…</span>`:""}
+    <span class="chip jump" onclick="newTicket('${l.id}')" title="Open a support ticket for this person">🎫 ＋ ticket</span>
     <span class="chip jump" onclick="newCoupon('${l.id}')" title="Issue a discount code through the admin panel">🎟 ＋ coupon</span>
     ${!locsFor(l).length?`<span class="chip jump" onclick="linkLocation('${l.id}')" title="Attach one of the Jira locations to this person">📍 link…</span>`:""}`:""}
   </div>`;
@@ -1420,17 +1594,20 @@ window.vcfAll = () => {
 };
 
 /* ---------- pools ---------- */
+/* CHASE: every list that asks for a call/mail must skip Won/Lost/Junk AND
+   leads marked "covered by the company's paying client" (group feature) */
+const CHASE = l => ACTIVE(l.stage) && !l.covered;
 const worked     = l => !l.isNew || l.attempted;
-const newLeads   = () => LEADS.filter(l=>l.isNew && !l.attempted && !l.internal).sort((a,b)=>b.created-a.created);
-const attemptedL = () => LEADS.filter(l=>l.attempted && ACTIVE(l.stage) && !l.internal)
+const newLeads   = () => LEADS.filter(l=>l.isNew && !l.attempted && !l.internal && !l.covered).sort((a,b)=>b.created-a.created);
+const attemptedL = () => LEADS.filter(l=>l.attempted && CHASE(l) && !l.internal)
                           .sort((a,b)=>(b.lastPast||b.created)-(a.lastPast||a.created));
-const followups  = () => LEADS.filter(l=>worked(l) && ACTIVE(l.stage) && !l.internal)
+const followups  = () => LEADS.filter(l=>worked(l) && CHASE(l) && !l.internal)
                           .sort((a,b)=>(b.lastPast||b.created)-(a.lastPast||a.created));
-const dueToday   = () => LEADS.filter(l=>!l.internal && ACTIVE(l.stage) && (
+const dueToday   = () => LEADS.filter(l=>!l.internal && CHASE(l) && (
                           (l.planned && l.planned<=TODAY) ||
                           (worked(l) && l.quiet>=CAD().resurface && l.quiet<CAD().quiet && l.touches<5)));
-const planned    = () => LEADS.filter(l=>l.planned && l.planned>TODAY && !l.internal && ACTIVE(l.stage)).sort((a,b)=>a.planned-b.planned);
-const goneQuiet  = () => LEADS.filter(l=>worked(l) && ACTIVE(l.stage) && !l.internal && l.quiet>=CAD().quiet)
+const planned    = () => LEADS.filter(l=>l.planned && l.planned>TODAY && !l.internal && CHASE(l)).sort((a,b)=>a.planned-b.planned);
+const goneQuiet  = () => LEADS.filter(l=>worked(l) && CHASE(l) && !l.internal && l.quiet>=CAD().quiet)
                           .sort((a,b)=>b.quiet-a.quiet);
 const coupons    = () => LEADS.filter(l=>(l.coupons.length||l.coupon) && !l.internal && !l.client)
                           .sort((a,b)=>{
@@ -1438,7 +1615,7 @@ const coupons    = () => LEADS.filter(l=>(l.coupons.length||l.coupon) && !l.inte
                             if(a.cp) return -1; if(b.cp) return 1;
                             return (b.created||0)-(a.created||0);
                           });
-const couponsExpiring = () => LEADS.filter(l=>!l.internal && !l.client && ACTIVE(l.stage) && l.cp && daysTo(l.cp.exp)<=7)
+const couponsExpiring = () => LEADS.filter(l=>!l.internal && !l.client && CHASE(l) && l.cp && daysTo(l.cp.exp)<=7)
                           .sort((a,b)=>a.cp.exp-b.cp.exp);
 /* follow-up queue rules: a touch snoozes the lead for N days, then it resurfaces.
    The rhythm is per user (Settings → My cadence). */
@@ -1672,13 +1849,10 @@ const PANELS = {
     render(){
       const q=(document.getElementById("q").value||"").toLowerCase().trim();
       const set=activeCountries();
-      const ccOf=cl=>{ const lead=cl.person_id&&byId[cl.person_id];
-        if(lead) return lead.cc;
-        const tld=(cl.email||"").split(".").pop().toLowerCase(); return TLD_CC[tld]||"?"; };
       const rbC = rangeBounds();
       const cs=(window.__clients||[]).filter(cl=>
         (!q||[cl.name,cl.email].some(v=>(v||"").toLowerCase().includes(q)))
-        && set.has(ccOf(cl))
+        && set.has(ccOfClient(cl))
         && (!rbC || (cl.first_paid_at && (!rbC.from || new Date(cl.first_paid_at)>=rbC.from)
                                       && (!rbC.to || new Date(cl.first_paid_at)<=rbC.to))));
       const soC=(window.__SORTX||{}).clients||"total";
@@ -2058,6 +2232,17 @@ const PANELS = {
           ${window.CANW!==false?`<button class="btn primary" onclick="doMerge('${d.a.id}','${d.b.id}')" title="Keep the first, fold the second into it">⇄ Merge them</button>
           <button class="btn" onclick="dupDismiss('${d.a.id}','${d.b.id}')">Different people</button>`:""}
         </div></div>`).join("")}`; })()}
+      ${(()=>{ const sug=groupSuggestions(); window.__grpSugg=sug;
+        if(!sug.length) return "";
+        return `<h2>🏢 Same company? (${sug.length})</h2>
+        <p class="hint">People sharing a company email domain. Grouping bands their cards together, nothing is merged; a lead whose company already pays can then be marked "covered" so nobody cold-calls a customer.</p>
+        ${sug.map((s,i)=>`<div class="card"><div class="row" style="cursor:default">
+          <div class="who"><span class="nm">🏢 ${esc(s.domain)}</span>
+            <div class="co">${s.members.map(m=>esc(m.name||m.email)+(m.client?" 💰":"")).join(" · ")}</div></div>
+          ${s.pays?'<span class="chip life-client">💰 one of them pays</span>':""}
+          ${window.CANW!==false?`<button class="btn primary" onclick="grpMake(${i})">🏢 Group them</button>
+          <button class="btn" onclick="grpDismiss('${esc(s.domain)}')">Different companies</button>`:""}
+        </div></div>`).join("")}`; })()}
       <details class="tbl"><summary>Dismissed (${dC.length+dM.length}): kept here forever, restore any time</summary>
       ${[...dC.map(callRow),...dM.map(mailRow)].join("")||'<div class="meta" style="padding:8px">Nothing dismissed yet</div>'}</details>`;
     }
@@ -2136,7 +2321,7 @@ function activityAdmin(){
   });
   const NAME={status:"status change", assign:"owner change", "mass-assign":"mass assignment", merge:"merge",
     unmerge:"merge undone", reminder:"reminder", delete:"deletion", archive:"archive", "ticket-state":"ticket state",
-    user:"user permissions", mailbox:"mailbox", cadence:"cadence"};
+    user:"user permissions", mailbox:"mailbox", cadence:"cadence", group:"company group", covered:"covered flag"};
   const arow=a=>{
     const p=a.person_id&&byId[a.person_id];
     return `<div class="card"><div class="row" ${p?`onclick="openPerson('${p.id}')"`:'style="cursor:default"'}>
@@ -3038,10 +3223,10 @@ window.showFilters = () => {
   const list=activeFilterList();
   window.__afl=list;
   const old=document.getElementById("mergeov"); if(old) old.remove();
-  const counts={}; LEADS.filter(l=>!l.internal).forEach(l=>counts[l.cc]=(counts[l.cc]||0)+1);
+  const counts=facetCounts();   // same per-tab honest numbers as the chip bar
   const set=activeCountries();
-  const ccChips=Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([cc,n])=>
-    `<button class="fbtn ${set.has(cc)?'active':''}" onclick="dlgCC('${cc}')" title="Click to show or hide this country">${flag(cc)} ${esc(CC_NAME[cc]||cc)} · ${n}</button>`).join("");
+  const ccChips=Object.entries(counts).sort((a,b)=>b[1]-a[1]||String(a[0]).localeCompare(String(b[0]))).map(([cc,n])=>
+    `<button class="fbtn ${set.has(cc)?'active':''}" ${n?"":'style="opacity:.45"'} onclick="dlgCC('${cc}')" title="${n} on this tab with the current filters">${flag(cc)} ${esc(CC_NAME[cc]||cc)} · ${n}</button>`).join("");
   const rb=(v,lb)=>`<button class="fbtn ${String(VIEW.range)===String(v)?'active':''}" onclick="dlgRange('${v}')">${lb}</button>`;
   // countries and date range are edited right here; everything else is a line with its own ✕
   const lines=list.map((f,i)=>({f,i})).filter(x=>x.f.kind!=="cc" && x.f.kind!=="range");
@@ -3161,6 +3346,40 @@ window.dupDismiss = async (aId,bId) => {
   await savePrefs(); toast("Marked as different people"); render(false);
 };
 const dupHidden = () => new Set(((window.__PREFS||{}).dupOk)||[]);
+/* company-group suggestions: 2+ people on one corporate email domain (free
+   mailers and the own company domain never count). Suggestion only. */
+function groupSuggestions(){
+  const FREE=new Set(["gmail.com","yahoo.com","hotmail.com","outlook.com","web.de","gmx.de","gmx.net","gmx.at",
+    "t-online.de","aol.com","icloud.com","me.com","live.com","live.de","yahoo.de","hotmail.de","outlook.de",
+    "googlemail.com","protonmail.com","proton.me","mail.com","msn.com","yandex.com","freenet.de","arcor.de","mail.ru","ymail.com"]);
+  const own=(ORG().mailDomain||"").toLowerCase();
+  const dm=e=>{const m=(e||"").toLowerCase().match(/@(.+)$/);return m?m[1]:null;};
+  const hid=new Set(((window.__PREFS||{}).grpOk)||[]);
+  const byDom={};
+  LEADS.filter(l=>!l.internal&&!l.gid).forEach(l=>{
+    const seen=new Set();
+    [l.email,l.alt].forEach(e=>{
+      const d=dm(e);
+      if(!d||FREE.has(d)||d===own||seen.has(d)) return;
+      seen.add(d);
+      (byDom[d]=byDom[d]||[]).push(l);
+    });
+  });
+  const out=[];
+  Object.entries(byDom).forEach(([d,ms])=>{
+    if(ms.length<2||hid.has(d)) return;
+    out.push({domain:d, members:ms.slice(0,6), pays:ms.some(x=>x.client)});
+  });
+  return out.sort((a,b)=>(b.pays?1:0)-(a.pays?1:0)).slice(0,20);
+}
+window.grpDismiss = async d => {
+  const P=window.__PREFS=(window.__PREFS||{}); P.grpOk=[...(P.grpOk||[]), d];
+  await savePrefs(); toast("Noted: different companies"); render(false);
+};
+window.grpMake = i => {
+  const s=(window.__grpSugg||[])[i]; if(!s) return;
+  groupCreate(s.domain, s.members.map(m=>m.id));
+};
 
 /* what the team actually did in the last seven days, which the funnel cannot
    show because the funnel counts stages, not work */
