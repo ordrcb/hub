@@ -374,11 +374,12 @@ window.toggleCC = cc => {
 function tabPool(){
   try{
     switch(CURRENT){
-      case "today":     return [...new Set([...dueToday(),...goneQuiet(),...couponsExpiring(),...planned()])];
+      case "today":     return [...new Set([...dueToday(),...goneQuiet(),...couponsExpiring(),...planned(),...cartLeads()])];
       case "fresh":     return [...newLeads(),...attemptedL()];
       case "followups": return followups();
       case "coupons":   return coupons();
-      default:          return LEADS.filter(l=>!l.internal);   // funnel: whole market, on purpose
+      case "funnel":    return LEADS.filter(l=>!l.internal && l.sf!=="stripe");   // lead intake only, no Stripe-born customers
+      default:          return LEADS.filter(l=>!l.internal);
     }
   }catch(e){ return LEADS.filter(l=>!l.internal); }
 }
@@ -650,6 +651,7 @@ async function loadData(delta){
       createdBy: p.created_by||null,
       gid: p.group_id||null,
       covered: !!p.covered_at,
+      refBy: p.referred_by||null,
       internal: isInternal(p.email)
     };
     derive(l);
@@ -681,6 +683,9 @@ async function loadData(delta){
   // company groups: several PEOPLE under one company (never merged)
   window.__groupMembers={};
   LEADS.forEach(l=>{ if(l.gid) (window.__groupMembers[l.gid]=window.__groupMembers[l.gid]||[]).push(l.id); });
+  // who referred whom (manual links)
+  window.__refKids={};
+  LEADS.forEach(l=>{ if(l.refBy) (window.__refKids[l.refBy]=window.__refKids[l.refBy]||[]).push(l.id); });
   // People completeness: humans the hub knows only from Stripe or support mail
   // get lightweight entries so the People tab really shows EVERYONE.
   const known=new Set();
@@ -1080,6 +1085,52 @@ window.groupCreate = async (name, ids) => {
   toast("Group created ✓"); render(false);
   groupDialog(data.id);   // the covered toggles live here: decide right away
 };
+/* referred-by: a MANUAL link (nothing in Salesforce or any mail carries who
+   referred whom; the salesperson hears it on the call and records it here) */
+window.refSet = pid => {
+  pickPerson("🤝 Who referred "+esc((byId[pid]||{}).name||"this person")+"?", async other=>{
+    const {error}=await sb.from("people").update({referred_by:other}).eq("id",pid);
+    if(error){ hubAlert("Failed", esc(error.message)); return; }
+    const l=byId[pid]; if(l) l.refBy=other;
+    ((window.__refKids=window.__refKids||{})[other]=window.__refKids[other]||[]).push(pid);
+    logAudit("referred",{person_id:pid, detail:"referred by "+((byId[other]||{}).name||other)});
+    const ov=document.getElementById("mergeov"); if(ov) ov.remove();
+    toast("Recorded: referred by "+((byId[other]||{}).name||"them")); render(false);
+  }, pid);
+};
+window.refOpen = pid => {
+  const l=byId[pid]; if(!l||!l.refBy) return;
+  const ref=byId[l.refBy];
+  let ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  ov=document.createElement("div"); ov.id="mergeov";
+  ov.innerHTML=`<div class="mcard"><h3>🤝 Referred by ${esc((ref||{}).name||"?")}</h3>
+    ${ref?`<div class="mhit" onclick="document.getElementById('mergeov').remove();openPerson('${ref.id}')"><b>Open ${esc(ref.name||ref.email||"the referrer")}</b></div>`:""}
+    ${window.CANW!==false?`<div class="mhit" onclick="document.getElementById('mergeov').remove();refUnlink('${pid}')"><b>✕ Unlink</b><br><span class="meta">Recorded wrongly? Only the link disappears, nothing else changes.</span></div>`:""}
+    <div class="acts" style="justify-content:flex-end"><button class="btn" onclick="document.getElementById('mergeov').remove()">Close</button></div></div>`;
+  ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
+  document.body.appendChild(ov);
+};
+window.refUnlink = async pid => {
+  const l=byId[pid]; if(!l||!l.refBy) return;
+  const was=l.refBy;
+  const {error}=await sb.from("people").update({referred_by:null}).eq("id",pid);
+  if(error){ hubAlert("Failed", esc(error.message)); return; }
+  l.refBy=null;
+  window.__refKids[was]=((window.__refKids||{})[was]||[]).filter(x=>x!==pid);
+  logAudit("referred",{person_id:pid, detail:"referral link removed"});
+  toast("Unlinked"); render(false);
+};
+window.refKids = pid => {
+  const kids=((window.__refKids||{})[pid]||[]).map(id=>byId[id]).filter(Boolean);
+  let ov=document.getElementById("mergeov"); if(ov) ov.remove();
+  ov=document.createElement("div"); ov.id="mergeov";
+  ov.innerHTML=`<div class="mcard"><h3>🤝 Referred by ${esc((byId[pid]||{}).name||"?")}</h3>
+    ${kids.map(k=>`<div class="mhit" onclick="document.getElementById('mergeov').remove();openPerson('${k.id}')">
+      <b>${esc(k.name||k.email||"?")}</b> <span class="meta">${esc(k.hub||k.stage)}${k.client?" · 💰 client":""}</span></div>`).join("")||'<div class="meta">Nobody yet</div>'}
+    <div class="acts" style="justify-content:flex-end"><button class="btn" onclick="document.getElementById('mergeov').remove()">Close</button></div></div>`;
+  ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
+  document.body.appendChild(ov);
+};
 window.groupStart = pid => {
   pickPerson("🏢 Same company as whom?", async other=>{
     const a=byId[pid], b=byId[other]; if(!a||!b) return;
@@ -1224,7 +1275,10 @@ function phead(l){
     ${!locsFor(l).length&&orphanKidsFor(l).length?`<span class="chip jump" onclick="document.getElementById('locs-${l.id}')?.scrollIntoView({behavior:'smooth'})" title="Shipments or service tickets in Jira that have no location ticket yet">📦 ${orphanKidsFor(l).length} in Jira</span>`:""}
     ${openT?`<span class="chip jump" onclick="jumpSearch('support','${esc(l.email||l.name)}')" title="Open their tickets in Support">🎫 ${openT} open →</span>`:""}
     ${actC?`<span class="chip jump coupon" onclick="jumpSearch('coupons','${esc(l.email||l.name)}')" title="Open in Coupons">🎟 ${actC} active →</span>`:""}
-    ${window.CANW!==false?`${!l.gid?`<span class="chip jump" onclick="groupStart('${l.id}')" title="Band this person together with a colleague at the same company (nothing is merged)">🏢 group…</span>`:""}
+    ${l.refBy&&byId[l.refBy]?`<span class="chip jump" onclick="refOpen('${l.id}')" title="Referred by ${esc((byId[l.refBy]||{}).name||"")}. Click to open or unlink.">🤝 by ${esc(String((byId[l.refBy]||{}).name||"").split(" ")[0])}</span>`:""}
+    ${((window.__refKids||{})[l.id]||[]).length?`<span class="chip jump" onclick="refKids('${l.id}')" title="People this person referred">🤝 referred ${((window.__refKids||{})[l.id]||[]).length} →</span>`:""}
+    ${window.CANW!==false?`${!l.refBy&&/empfehl|referr/i.test(l.src||"")?`<span class="chip jump" style="color:var(--serious)" onclick="refSet('${l.id}')" title="The source says referral but nobody recorded WHO referred them. One click fixes that.">🤝 referred: by whom?</span>`:(!l.refBy?`<span class="chip jump" onclick="refSet('${l.id}')" title="Record who referred this person (heard on a call, e.g. 'Singh sent me')">🤝 referred by…</span>`:"")}
+    ${!l.gid?`<span class="chip jump" onclick="groupStart('${l.id}')" title="Band this person together with a colleague at the same company (nothing is merged)">🏢 group…</span>`:""}
     <span class="chip jump" onclick="newTicket('${l.id}')" title="Open a support ticket for this person">🎫 ＋ ticket</span>
     <span class="chip jump" onclick="newCoupon('${l.id}')" title="Issue a discount code through the admin panel">🎟 ＋ coupon</span>
     ${!locsFor(l).length?`<span class="chip jump" onclick="linkLocation('${l.id}')" title="Attach one of the Jira locations to this person">📍 link…</span>`:""}`:""}
@@ -1617,6 +1671,9 @@ const coupons    = () => LEADS.filter(l=>(l.coupons.length||l.coupon) && !l.inte
                           });
 const couponsExpiring = () => LEADS.filter(l=>!l.internal && !l.client && CHASE(l) && l.cp && daysTo(l.cp.exp)<=7)
                           .sort((a,b)=>a.cp.exp-b.cp.exp);
+/* abandoned checkout: they were paying and stopped; hottest chase list there is */
+const cartLeads  = () => LEADS.filter(l=>!l.internal && !l.client && CHASE(l) && /Checkout/i.test(l.src||""))
+                          .sort((a,b)=>(b.created||0)-(a.created||0));
 /* follow-up queue rules: a touch snoozes the lead for N days, then it resurfaces.
    The rhythm is per user (Settings → My cadence). */
 function CAD(){ return Object.assign({resurface:3, quiet:14, callFrom:9, callTo:20, giveup:5},
@@ -1676,16 +1733,22 @@ const applyQ = arr => {
 
 const PANELS = {
   today: {
-    title:"Today", filterable:true, count:()=>applyView(dueToday()).length+applyView(goneQuiet()).length+applyView(couponsExpiring()).length,
+    title:"Today", filterable:true, count:()=>applyView(dueToday()).length+applyView(goneQuiet()).length+applyView(couponsExpiring()).length+applyView(cartLeads()).length,
     render(){
-      const due=applyQ(dueToday()), quiet=applyQ(goneQuiet()), plan=applyQ(planned()), cexp=applyQ(couponsExpiring());
+      const due=applyQ(dueToday()), quiet=applyQ(goneQuiet()), plan=applyQ(planned()), cexp=applyQ(couponsExpiring()), cart=applyQ(cartLeads());
       return `
       <div class="tiles">
+        <div class="tile click" onclick="jump('sec-cart')"><div class="v">${cart.length}</div><div class="l">🛒 Started checkout</div><div class="s">pulled out the card, never paid</div></div>
         <div class="tile click" onclick="jump('sec-due')"><div class="v">${due.length}</div><div class="l">Follow-ups due</div><div class="s">planned or ${CAD().resurface}+ days silent</div></div>
         <div class="tile click" onclick="jump('sec-cexp')"><div class="v">${cexp.length}</div><div class="l">Coupons expiring ≤7d</div><div class="s">call before the code dies</div></div>
         <div class="tile click" onclick="jump('sec-quiet')"><div class="v">${quiet.length}</div><div class="l">Gone quiet</div><div class="s">${CAD().quiet}+ days, still active</div></div>
         <div class="tile click" onclick="go('fresh')"><div class="v">${applyQ(newLeads()).length}</div><div class="l">Untouched leads</div><div class="s">zero activity so far</div></div>
       </div>
+      <h2 id="sec-cart">🛒 Started checkout, never paid (${cart.length})</h2>
+      <p class="hint">The hottest list there is: they were in the middle of buying and stopped. Disappears when they pay, or when marked Lost.</p>
+      ${list(cart, l=> (l.lastPast&&daysAgo(l.lastPast)===0)
+        ? {txt:"✓ called today", dim:true}
+        : {txt:(l.created?(daysAgo(l.created)===0?"today":daysAgo(l.created)+"d ago"):""), cls:l.created&&daysAgo(l.created)<=7?"due":""})}
       <h2 id="sec-cexp">Coupons expiring soon (${cexp.length})</h2>
       ${list(cexp, l=> (l.lastPast&&daysAgo(l.lastPast)===0)
         ? {txt:"✓ called today · "+expTxt(l.cp), dim:true}
@@ -1779,9 +1842,13 @@ const PANELS = {
     }
   },
   funnel: {
-    title:"Funnel", filterable:true, count:()=>applyView(LEADS.filter(l=>!l.internal)).length,
+    title:"Funnel", filterable:true, count:()=>applyView(LEADS.filter(l=>!l.internal && l.sf!=="stripe")).length,
     render(){
-      const arr=applyQ(LEADS.filter(l=>!l.internal));
+      // funnel = people who ARRIVED AS LEADS. Customers born from Stripe (no
+      // lead journey, marker sf_status "stripe") are not funnel material and
+      // used to inflate Won to 34%; they live in Clients and People instead.
+      const arr=applyQ(LEADS.filter(l=>!l.internal && l.sf!=="stripe"));
+      const stripeBorn=LEADS.filter(l=>!l.internal && l.sf==="stripe").length;
       const set=activeCountries(), rb=rangeBounds();
       const mergedN=(window.__mergedRows||[]).filter(m=>set.has(m.cc) &&
         (!rb || (m.created && (!rb.from||m.created>=rb.from) && (!rb.to||m.created<=rb.to)))).length;
@@ -1808,14 +1875,25 @@ const PANELS = {
       const attempted=realArr.filter(l=>l.attempted).length;
       const cnt=s=>realArr.filter(l=>!l.isNew&&l.stage===s).length;
       const won=cnt("Won"), offers=cnt("Offer sent");
+      // "Contacted" is a status people set with different meanings; the call log
+      // decides whether a conversation ACTUALLY happened: a connected call, a
+      // held meeting, a logged WA call, or an email reply received from them
+      const spoke=l=>l.logs.some(g=>
+        (g.kind==="call" && (!g.detail || !/not reached/i.test(g.detail))) ||
+        (g.kind==="meeting" && !/CANCELED/.test(g.detail||"") && day(String(g.at).slice(0,10))<=TODAY) ||
+        (g.kind==="email" && !g.by_user) ||
+        (g.kind==="wa" && /WA call/i.test(g.detail||"")));
+      const contacted=realArr.filter(l=>!l.isNew&&l.stage==="Contacted");
+      const cSpoke=contacted.filter(spoke).length;
       const stages=[["New · untouched",untouched],["New · attempted",attempted],
-        ["Contacted",cnt("Contacted")],["Qualified",cnt("Qualified")],["Offer sent",offers],
+        ["Contacted · spoke",cSpoke],["Contacted · no answer",contacted.length-cSpoke],
+        ["Qualified",cnt("Qualified")],["Offer sent",offers],
         ["Won",won],["Lost",cnt("Lost")]];
-      const colors=["var(--f1)","var(--f1)","var(--f2)","var(--f3)","var(--f4)","var(--f5)","var(--fgray)"];
+      const colors=["var(--f1)","var(--f1)","var(--f2)","var(--f2)","var(--f3)","var(--f4)","var(--f5)","var(--fgray)"];
       const bs=[["Wrong number",B.wrong],["Duplicates",B.dup],["Junk / fake",B.junk],["Gave up · "+GIVEUP+"+ tries",B.gaveup]];
-      const bucketSrc=s=>!s?"Other":/Discount/i.test(s)?"Discount request":/Book a Call/i.test(s)?"Book a call"
+      const bucketSrc=s=>!s?"Other":/empfehl|referr/i.test(s)?"Referral":/Discount/i.test(s)?"Discount request":/Book a Call/i.test(s)?"Book a call"
         :/Checkout/i.test(s)?"Checkout":/Calendly/i.test(s)?"Calendly":s==="Website"?"Website":"Other";
-      const sc={}; arr.forEach(l=>{const k=bucketSrc(l.src); sc[k]=(sc[k]||0)+1;});
+      const sc={}; arr.forEach(l=>{const k=l.refBy?"Referral":bucketSrc(l.src); sc[k]=(sc[k]||0)+1;});
       const src=Object.entries(sc).sort((a,b)=>b[1]-a[1]);
       return `
       <div class="tiles">
@@ -1829,7 +1907,7 @@ const PANELS = {
       <p class="hint">Wrong number = status call_na and never a connected call (calling no longer applicable). Gave up = ${GIVEUP}+ call attempts, none connected (threshold: Settings → My cadence). Duplicates = merged cards + Salesforce-flagged. Anyone you later actually reach moves back to Real automatically.</p>
       ${bars(bs,["var(--serious)","var(--fgray)","var(--fgray)","var(--warn)"],received)}</details>
       <h2>Pipeline, real leads only (${realN})</h2>
-      <p class="hint">Counts follow the filter bar (countries + date range). Percentages are of REAL leads, so conversion is honest: dead numbers and junk no longer water it down. Nothing is changed in Salesforce.</p>
+      <p class="hint">Counts follow the filter bar (countries + date range). Percentages are of REAL leads, so conversion is honest: dead numbers and junk no longer water it down. "Spoke" comes from the call log (connected call, meeting, WA call or a reply from them), not from the status. Nothing is changed in Salesforce.${stripeBorn?` Plus ${stripeBorn} existing customers who never came in as leads; they live in Clients, not in this funnel.`:""}</p>
       ${bars(stages,colors,realN||1)}
       <h2>Leads by source (all received)</h2>
       ${bars(src,["var(--f3)","var(--f3)","var(--f3)","var(--f3)","var(--f3)","var(--f3)"],received)}
@@ -2321,7 +2399,7 @@ function activityAdmin(){
   });
   const NAME={status:"status change", assign:"owner change", "mass-assign":"mass assignment", merge:"merge",
     unmerge:"merge undone", reminder:"reminder", delete:"deletion", archive:"archive", "ticket-state":"ticket state",
-    user:"user permissions", mailbox:"mailbox", cadence:"cadence", group:"company group", covered:"covered flag"};
+    user:"user permissions", mailbox:"mailbox", cadence:"cadence", group:"company group", covered:"covered flag", referred:"referral link"};
   const arow=a=>{
     const p=a.person_id&&byId[a.person_id];
     return `<div class="card"><div class="row" ${p?`onclick="openPerson('${p.id}')"`:'style="cursor:default"'}>
