@@ -2519,7 +2519,7 @@ function render(){
         }catch(e){return "";}})()}
         <div class="nfrow">
           ${(()=>{try{
-            const rems=(window.__rems||[]).filter(r=>!r.done_at);
+            const rems=remAll();
             const due=rems.filter(r=>day(r.due)&&day(r.due)<=TODAY).length;
             return `<a class="nficon" onclick="remList()" title="Reminders${due?": "+due+" due now":rems.length?": "+rems.length+" upcoming":""}">${ICN.bell}${due?`<span class="bdg">${due}</span>`:""}</a>`;
           }catch(e){return `<a class="nficon" onclick="remList()" title="Reminders">${ICN.bell}</a>`;}})()}
@@ -2714,9 +2714,18 @@ window.remDialog = (kind, target, label) => {
     render(false);
   };
 };
+/* one list for every manual reminder: rows from the reminders table PLUS the
+   person-card "⏰ Remind me…" dates (people.next_due). No stage filter here:
+   client payment reminders belong in the bell like everything set by hand. */
+window.remAll = () => {
+  const tbl=(window.__rems||[]).filter(r=>!r.done_at);
+  const nd=(typeof LEADS!=="undefined"?LEADS:[]).filter(l=>l.due && !l.internal)
+    .map(l=>({_nd:true, id:"nd:"+l.id, kind:"sales", due:l.due, note:null,
+      label:(l.name||"")+(l.co?" · "+l.co:""), person_id:l.id, ticket_id:null, ops_id:null}));
+  return [...tbl, ...nd].sort((a,b)=>String(a.due).localeCompare(String(b.due)));
+};
 window.remList = () => {
-  const rems=(window.__rems||[]).filter(r=>!r.done_at)
-    .sort((a,b)=>String(a.due).localeCompare(String(b.due)));
+  const rems=remAll();
   window.__remShown=rems;
   const old=document.getElementById("mergeov"); if(old) old.remove();
   const KI={sales:"✦",support:"🎫",ops:"🔧"};
@@ -2729,8 +2738,8 @@ window.remList = () => {
       <span class="meta ${isDue?'due':''}" style="min-width:64px">${dueD?dueD.toLocaleDateString(undefined,{day:"numeric",month:"short"}):esc(r.due)}</span>
       <span style="flex:1">${KI[r.kind]||"⏰"} ${esc(tgt(r))}${r.note?` <span class="meta">${esc(r.note)}</span>`:""}</span>
       ${(r.person_id&&byId[r.person_id])||r.ticket_id||r.ops_id?`<button class="btn" onclick="remGo(${i})" title="Open what this is about">→</button>`:""}
-      <button class="btn" onclick="remDone(${i})" title="Done: it leaves the bell">✓</button>
-      <button class="btn" onclick="remDel(${i})" title="Delete without marking done">🗑</button></div>`;
+      <button class="btn" onclick="remDone(${i})" title="${r._nd?"Done: clears the ⏰ date on the person card":"Done: it leaves the bell"}">✓</button>
+      ${r._nd?"":`<button class="btn" onclick="remDel(${i})" title="Delete without marking done">🗑</button>`}</div>`;
   };
   const due=rems.map((r,i)=>({r,i})).filter(x=>day(x.r.due)&&day(x.r.due)<=TODAY);
   const later=rems.map((r,i)=>({r,i})).filter(x=>!(day(x.r.due)&&day(x.r.due)<=TODAY));
@@ -2738,7 +2747,7 @@ window.remList = () => {
   ov.innerHTML=`<div class="mcard" style="width:560px"><h3>🔔 Your reminders</h3>
     ${due.length?`<div class="meta"><b>Due now</b></div>${due.map(x=>rowR(x.r,x.i)).join("")}`:""}
     ${later.length?`<div class="meta" style="margin-top:6px"><b>Upcoming</b></div>${later.map(x=>rowR(x.r,x.i)).join("")}`:""}
-    ${rems.length?"":'<div class="empty">No reminders. Set one from the ＋ menu, a ticket, or an operations row.</div>'}
+    ${rems.length?"":'<div class="empty">No reminders. Set one from the ＋ menu, a person card’s ⏰, a ticket, or an operations row.</div>'}
     <div class="acts" style="justify-content:flex-end;margin-top:8px">
       <button class="btn" onclick="document.getElementById('mergeov').remove()">Close</button>
     </div></div>`;
@@ -2754,6 +2763,15 @@ window.remGo = i => {
 };
 window.remDone = async i => {
   const r=(window.__remShown||[])[i]; if(!r) return;
+  if(r._nd){                                   // card ⏰ reminder: done = clear the date
+    const {error}=await sb.from("people").update({next_due:null}).eq("id",r.person_id);
+    if(error){ hubAlert("Failed", esc(error.message)); return; }
+    const l=(typeof LEADS!=="undefined"?LEADS:[]).find(x=>x.id===r.person_id);
+    if(l){ l.due=null; derive(l); }
+    const p=(RAW.people||[]).find(x=>x.id===r.person_id); if(p) p.next_due=null;
+    toast("Done ✓"); render(false); remList();
+    return;
+  }
   const now=new Date().toISOString();
   const {error}=await sb.from("reminders").update({done_at:now}).eq("id",r.id);
   if(error){ hubAlert("Failed", esc(error.message)); return; }
