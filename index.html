@@ -110,8 +110,8 @@ textarea.note{width:100%;min-height:34px;resize:vertical}
 .mcard .meta{white-space:normal;overflow-wrap:anywhere}
 /* the create button: quiet, round, monochrome; it should feel premium, not loud */
 #plusbtn{width:34px;height:34px;border-radius:50%;padding:0;font-size:19px;line-height:1;font-weight:500;
-  background:var(--ink);color:var(--page);border:1px solid var(--ink);flex:none;margin-left:auto}
-#plusbtn:hover{opacity:.82;background:var(--ink)}
+  background:var(--accent);color:#fff;border:1px solid var(--accent);flex:none;margin-left:auto}
+#plusbtn:hover{opacity:.85;background:var(--accent)}
 /* contact details first: the two things you grab when the phone rings */
 .pcontacts{display:flex;gap:8px;flex-wrap:wrap;width:100%}
 .pcontacts .chip{font-size:12.5px;padding:5px 12px;border:1px solid var(--border);background:var(--surface);color:var(--ink)}
@@ -181,8 +181,14 @@ details.snip .body{margin:4px 0;padding:6px 8px;background:var(--chipbg);border-
 .logincard .err{color:var(--crit);font-size:12px;min-height:16px}
 #loading{position:fixed;inset:0;display:none;align-items:center;justify-content:center;color:var(--muted);font-size:13px}
 @media (max-width:760px){
-  .layout{flex-direction:column} nav{width:auto;height:auto;position:static;display:flex;flex-direction:row;overflow-x:auto;padding:8px}
-  .brand,.navfoot{display:none} .navbtn{white-space:nowrap} main{padding:14px}
+  .layout{flex-direction:column} nav{width:auto;height:auto;position:static;display:flex;flex-direction:row;overflow-x:auto;padding:8px;align-items:center}
+  .brand{display:none} .navbtn{white-space:nowrap} main{padding:14px}
+  /* phone: keep account, bell, theme, sync and reload reachable as a compact
+     strip at the end of the horizontal tab bar (swipe left to reach it) */
+  .navfoot{margin-top:0;padding:0 8px;flex:none;display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:11px}
+  .navfoot br{display:none}
+  .navfoot .nfrow{margin-bottom:0}
+  .navfoot .nfacct{max-width:130px;overflow:hidden;text-overflow:ellipsis}
 }
 </style>
 </head>
@@ -2738,10 +2744,18 @@ window.remList = () => {
   const tgt=r=> r.label ? r.label
     : r.person_id&&byId[r.person_id] ? (byId[r.person_id].name||"")
     : r.ticket_id ? "ticket #"+r.ticket_id : (r.ops_id||"");
+  // what KIND of thing this reminder is about, at a glance
+  const lblR=r=>{
+    if(r.ops_id) return String(r.ops_id).split(":")[0]||"ops";     // payment, test, …
+    if(r.ticket_id) return "support";
+    if(r.person_id&&byId[r.person_id]) return byId[r.person_id].client?"client":"lead";
+    return r.kind||"";
+  };
   const rowR=(r,i)=>{
     const dueD=day(r.due), isDue=dueD&&dueD<=TODAY;
     return `<div class="row" style="cursor:default;display:flex;align-items:center;gap:8px;padding:5px 0">
       <span class="meta ${isDue?'due':''}" style="min-width:64px">${dueD?dueD.toLocaleDateString(undefined,{day:"numeric",month:"short"}):esc(r.due)}</span>
+      ${lblR(r)?`<span class="chip" style="flex:none">${esc(lblR(r))}</span>`:""}
       <span style="flex:1">${KI[r.kind]||"⏰"} ${esc(tgt(r))}${r.note?` <span class="meta">${esc(r.note)}</span>`:""}</span>
       ${(r.person_id&&byId[r.person_id])||r.ticket_id||r.ops_id?`<button class="btn" onclick="remGo(${i})" title="Open what this is about">→</button>`:""}
       <button class="btn" onclick="remDone(${i})" title="${r._nd?"Done: clears the ⏰ date on the person card":"Done: it leaves the bell"}">✓</button>
