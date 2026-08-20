@@ -818,7 +818,7 @@ function leadRow(l, extra){
           <button class="btn" onclick="addNote('${l.id}')">Add</button>
         </div>`:""}
         <div class="meta">Source: ${esc(l.src||"?")} · Created ${l.created?l.created.toLocaleDateString():"?"} · ${esc(l.phone||"no phone")}${l.alt?` · also: ${esc(l.alt)}`:""}
-          ${l.sfId&&ORG().salesforceUrl?` · <a class="sflink" href="${esc(ORG().salesforceUrl)}/lightning/r/Lead/${l.sfId}/view" target="_blank" onclick="event.stopPropagation()">Salesforce ↗</a>`:""}</div>
+          ${l.sfId&&ORG().salesforceUrl?` · <a class="sflink" href="${esc(ORG().salesforceUrl)}/lightning/r/Lead/${l.sfId}/view" target="_blank" onclick="event.stopPropagation()">Salesforce ↗</a>`:""}${l.client&&l.client.stripe_id?` · <a class="sflink" href="https://dashboard.stripe.com/customers/${esc(l.client.stripe_id)}" target="_blank" onclick="event.stopPropagation()">Stripe ↗</a>`:""}</div>
       </div>
     </div>
   </div>`;
@@ -1270,7 +1270,11 @@ function phead(l){
     ${l.gid&&(window.__groupBy||{})[l.gid]?`<span class="chip jump" onclick="groupDialog(${l.gid})" title="Company group: several people, one company. Click for members and the covered switch.">🏢 ${esc((window.__groupBy||{})[l.gid].name)} · ${((window.__groupMembers||{})[l.gid]||[]).length}${((window.__groupMembers||{})[l.gid]||[]).some(id=>(byId[id]||{}).client)?" · 💰 pays":""}</span>`:""}
     ${l.due&&day(l.due)&&day(l.due)>TODAY?`<span class="chip" title="Personal reminder set">⏰ ${day(l.due).toLocaleDateString(undefined,{day:"numeric",month:"short"})}</span>`:""}
     ${l.client?`<span class="chip jump life-client" onclick="jumpSearch('clients','${esc(l.client.email||l.email||l.name)}')" title="Open in Clients">💰 ${esc(eur(l.client.total_paid,l.client.currency))} · ${l.client.payments}× paid →</span>`:""}
-    ${ppOf(l).length?`<span class="chip jump" style="color:var(--crit)" onclick="go('ops');window.__OPS={kind:'payment'}" title="${esc(ppOf(l).map(p=>Math.round(p.amount/100)+"€ · "+(p.reason||p.status)).join(" · "))}">⚠ ${ppOf(l).length} failed payment${ppOf(l).length>1?"s":""} →</span>`:""}
+    ${(()=>{ // "failed" only when Stripe has given up; a scheduled retry is just pending
+      const fp=ppOf(l); if(!fp.length) return "";
+      const rt=fp.filter(p=>p.next_retry&&new Date(p.next_retry)>new Date()).length, fl=fp.length-rt;
+      const lbl=[fl?`⚠ ${fl} failed payment${fl>1?"s":""}`:"",rt?`⏳ ${rt} payment${rt>1?"s":""} retrying`:""].filter(Boolean).join(" · ");
+      return `<span class="chip jump" style="color:${fl?"var(--crit)":"var(--ink2)"}" onclick="go('ops');window.__OPS={kind:'payment'}" title="${esc(fp.map(p=>Math.round(p.amount/100)+"€ · "+(p.reason||p.status)).join(" · "))}">${lbl} →</span>`; })()}
     ${locsFor(l).length?`<span class="chip jump" onclick="document.getElementById('locs-${l.id}')?.scrollIntoView({behavior:'smooth'})" title="Contracts, shipments and service from Jira">📍 ${locsFor(l).length} location${locsFor(l).length>1?"s":""}</span>`:""}
     ${!locsFor(l).length&&orphanKidsFor(l).length?`<span class="chip jump" onclick="document.getElementById('locs-${l.id}')?.scrollIntoView({behavior:'smooth'})" title="Shipments or service tickets in Jira that have no location ticket yet">📦 ${orphanKidsFor(l).length} in Jira</span>`:""}
     ${openT?`<span class="chip jump" onclick="jumpSearch('support','${esc(l.email||l.name)}')" title="Open their tickets in Support">🎫 ${openT} open →</span>`:""}
@@ -2203,6 +2207,7 @@ const PANELS = {
           <div class="who"><span class="nm">${i.icon} ${i.who}</span><div class="co">${esc(i.title)}</div></div>
           ${i.key?`<span class="chip">${jiraLink(i.key)}</span>`:""}
           ${i.kid&&upsLink(i.kid,i.loc)?`<a class="chip jump" href="${esc(upsLink(i.kid,i.loc))}" target="_blank" onclick="event.stopPropagation()">📦 track ↗</a>`:""}
+          ${i.pp&&i.pp.invoice_id?`<a class="chip jump" href="https://dashboard.stripe.com/invoices/${esc(i.pp.invoice_id)}" target="_blank" title="Open this invoice in Stripe" onclick="event.stopPropagation()">Stripe ↗</a>`:""}
           ${i.pp?`<button class="btn" onclick="copyTxt('${esc(i.email||"")}','email');event.stopPropagation()" title="Copy email">📋 ✉</button>`:""}
           <button class="btn" onclick="remO('${i.id}');event.stopPropagation()" title="A personal reminder under the 🔔 bell for this item">⏰</button>
           ${window.CANW!==false?(hid
@@ -2502,7 +2507,7 @@ function render(){
   const nav=document.getElementById("nav");
   const cnt=p=>{ try{ return p.count(); }catch(e){ console.error("count failed:",e); return "!"; } };
   try{
-    nav.innerHTML=`<div class="brand">${esc(ORG().brand||"Hub")}<small>sales &amp; support</small></div>`+
+    nav.innerHTML=`<div class="brand">${esc(ORG().brand||"Hub")}<small>sales · support · operations</small></div>`+
       Object.entries(PANELS).filter(([k,p])=>!p.hidden &&
         (!window.PROFILE || PROFILE.role==="admin" || (PROFILE.tabs||[]).includes(k))).map(([k,p])=>
         `<button class="navbtn ${k===CURRENT?'active':''}" onclick="go('${k}')">${p.title}<span class="cnt">${cnt(p)}</span></button>`).join("")+
