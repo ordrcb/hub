@@ -13,7 +13,7 @@
   --grid:#e5ded4; --border:rgba(59,47,36,.12); --accent:#a8712f;
   --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b; --goodtext:#006300;
   --f1:#e2c9a8; --f2:#cfa878; --f3:#b77b38; --f4:#8f5e27; --f5:#5e3d18; --fgray:#d5cec2;
-  --chipbg:#f0ece5; --mixpct:18%; --chipink:#52514e;
+  --chipbg:#f0ece5; --mixpct:18%; --selmix:26%; --chipink:#52514e;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
@@ -21,7 +21,7 @@
     --page:#191410; --surface:#221b15; --nav:#1f1913; --ink:#ece5dc; --ink2:#a89a89; --muted:#8d8071;
     --grid:#32281f; --border:rgba(236,229,220,.10); --accent:#c98d4f;
     --goodtext:#0ca30c; --f1:#e8cfa6; --f2:#d9ab6d; --f3:#c98d4f; --f4:#a06b30; --f5:#6f4a20; --fgray:#4a3f33;
-    --chipbg:#2a2118; --mixpct:30%; --chipink:#d8ccbc;
+    --chipbg:#2a2118; --mixpct:30%; --selmix:16%; --chipink:#d8ccbc;
   }
 }
 :root[data-theme="dark"]{
@@ -29,7 +29,7 @@
   --page:#191410; --surface:#221b15; --nav:#1f1913; --ink:#ece5dc; --ink2:#a89a89; --muted:#8d8071;
   --grid:#32281f; --border:rgba(236,229,220,.10); --accent:#c98d4f;
   --goodtext:#0ca30c; --f1:#e8cfa6; --f2:#d9ab6d; --f3:#c98d4f; --f4:#a06b30; --f5:#6f4a20; --fgray:#4a3f33;
-  --chipbg:#2a2118; --mixpct:30%; --chipink:#d8ccbc;
+  --chipbg:#2a2118; --mixpct:30%; --selmix:16%; --chipink:#d8ccbc;
 }
 *{box-sizing:border-box}
 body{margin:0;font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--page);color:var(--ink)}
@@ -57,6 +57,9 @@ main{flex:1;padding:20px 24px;max-width:1060px}
 header.top{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
 header.top h1{font-size:18px;margin:0}
 .search{flex:1;min-width:180px;max-width:340px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit}
+input::placeholder,textarea::placeholder{color:var(--muted);opacity:1}
+input:-webkit-autofill{-webkit-box-shadow:0 0 0 40px var(--surface) inset;-webkit-text-fill-color:var(--ink)}
+select{font:inherit;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:8px}
 .stamp{font-size:12px;color:var(--muted)}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px}
 .tile{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
@@ -116,6 +119,9 @@ textarea.note{width:100%;min-height:34px;resize:vertical}
 .pcontacts{display:flex;gap:8px;flex-wrap:wrap;width:100%}
 .pcontacts .chip{font-size:12.5px;padding:5px 12px;border:1px solid var(--border);background:var(--surface);color:var(--ink)}
 .pcontacts .chip:hover{background:var(--chipbg)}
+#cdrop{position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:80;min-width:220px;max-width:min(92vw,360px);max-height:50vh;overflow-y:auto;padding:4px}
+#cdrop .qhit .btn{flex:none;font-size:11px;padding:2px 8px}
 .mcard .li{width:100%;min-width:0}
 .mcard .acts{gap:8px;flex-wrap:wrap;align-items:center}
 .mcard .acts .li{width:auto;flex:1 1 120px}
@@ -136,7 +142,21 @@ textarea.note{width:100%;min-height:34px;resize:vertical}
 .note-banner{border:1px solid var(--border);border-left:3px solid var(--warn);background:var(--surface);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--ink2);margin-bottom:12px}
 .filters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
 .fbtn{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:99px;padding:5px 12px;font:inherit;font-size:12px;cursor:pointer}
-.fbtn.active{background:color-mix(in srgb, var(--accent) 14%, var(--surface));color:var(--accent);border-color:var(--accent);font-weight:600}
+.fbtn.active{background:color-mix(in srgb, var(--accent) var(--selmix,16%), var(--surface));color:var(--accent);border-color:var(--accent);font-weight:600}
+/* an OPEN lead card's top row goes quiet: name only, the header below already
+   says everything (email, phone, money, locations). Closed rows keep the chips. */
+.card.open[data-id]>.row .chip,.card.open[data-id]>.row .btn,.card.open[data-id]>.row .tz,
+.card.open[data-id]>.row .badge-t,.card.open[data-id]>.row>.meta{display:none}
+/* header toolbar: segmented quick ranges + the single Filters button */
+.seg{display:flex;border:1px solid var(--border);border-radius:99px;background:var(--surface);overflow:hidden;flex:none}
+.seg button{border:0;background:none;color:var(--ink2);font:inherit;font-size:12px;padding:6px 12px;cursor:pointer;border-right:1px solid var(--border);white-space:nowrap}
+.seg button:last-child{border-right:0}
+.seg button.on{background:color-mix(in srgb,var(--accent) var(--selmix,16%),var(--surface));color:var(--accent);font-weight:600}
+.fbt{display:flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:99px;padding:6px 13px;font:inherit;font-size:12.5px;cursor:pointer;flex:none}
+.fbt svg{width:14px;height:14px}
+.fbt .n{background:var(--accent);color:var(--page);border-radius:99px;font-size:10.5px;font-weight:700;padding:1px 6px;line-height:1.5}
+#hctl{flex-wrap:wrap}
+.fsec{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin:14px 0 7px;font-weight:600}
 details.tbl{margin-top:10px}
 details.tbl summary{font-size:12px;color:var(--muted);cursor:pointer}
 table{border-collapse:collapse;margin-top:8px;font-variant-numeric:tabular-nums}
@@ -181,8 +201,10 @@ details.snip .body{margin:4px 0;padding:6px 8px;background:var(--chipbg);border-
 .logincard .err{color:var(--crit);font-size:12px;min-height:16px}
 #loading{position:fixed;inset:0;display:none;align-items:center;justify-content:center;color:var(--muted);font-size:13px}
 @media (max-width:760px){
+  html,body{overflow-x:hidden}
   .layout{flex-direction:column} nav{width:auto;height:auto;position:static;display:flex;flex-direction:row;overflow-x:auto;padding:8px;align-items:center}
-  .brand{display:none} .navbtn{white-space:nowrap} main{padding:14px}
+  .brand{display:none} .navbtn{white-space:nowrap} main{padding:14px;min-width:0}
+  .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
   /* phone: keep account, bell, theme, sync and reload reachable as a compact
      strip at the end of the horizontal tab bar (swipe left to reach it) */
   .navfoot{margin-top:0;padding:0 8px;flex:none;display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:11px}
@@ -381,11 +403,17 @@ window.toggleCC = cc => {
 function tabPool(){
   try{
     switch(CURRENT){
-      case "today":     return [...new Set([...dueToday(),...goneQuiet(),...couponsExpiring(),...planned(),...cartLeads()])];
+      case "today":     return [...new Set([...cartLeads(),...couponsExpiring(),...dueNow(followups()),...planned()])];
       case "fresh":     return [...newLeads(),...attemptedL()];
       case "followups": return followups();
       case "coupons":   return coupons();
       case "funnel":    return LEADS.filter(l=>!l.internal && l.sf!=="stripe");   // lead intake only, no Stripe-born customers
+      case "support":   return (window.__tickets||[]).filter(t=>!t.junked).map(t=>{
+                          const l=t.person_id&&byId[t.person_id];
+                          return {cc:l?l.cc:"?", created:day(String(t.opened_at||"").slice(0,10)), phone:l?l.phone:null}; });
+      case "ops":       return opsItems().map(i=>{
+                          const p=(i.loc&&i.loc.person_id&&byId[i.loc.person_id])||(i.kid&&i.kid.person_id&&byId[i.kid.person_id]);
+                          return {cc:p?p.cc:"?", created:null, phone:p?p.phone:null}; });
       default:          return LEADS.filter(l=>!l.internal);
     }
   }catch(e){ return LEADS.filter(l=>!l.internal); }
@@ -394,13 +422,10 @@ function tabPool(){
    filters (date range, callable), before the country choice itself. Countries
    that exist in the hub but not in this view stay visible with a 0. */
 function facetCounts(){
-  let pool;
-  if(CURRENT==="clients")
-    pool=(window.__clients||[]).map(cl=>({cc:ccOfClient(cl), created:cl.first_paid_at?day(String(cl.first_paid_at).slice(0,10)):null, phone:null}));
-  else pool=tabPool();
+  const pool=tabPool();
   const rb=rangeBounds();
   let cp=pool.filter(l=>!rb || (l.created && (!rb.from||l.created>=rb.from) && (!rb.to||l.created<=rb.to)));
-  if(VIEW.callable && CURRENT!=="clients") cp=cp.filter(l=>{const c=callable(l); return c&&c.ok;});
+  if(VIEW.callable) cp=cp.filter(l=>{const c=callable(l); return c&&c.ok;});
   const counts={};
   try{
     LEADS.filter(l=>!l.internal).forEach(l=>{ if(!(l.cc in counts)) counts[l.cc]=0; });
@@ -409,27 +434,8 @@ function facetCounts(){
   cp.forEach(l=>counts[l.cc]=(counts[l.cc]||0)+1);
   return counts;
 }
-function viewbar(){
-  const counts=facetCounts();
-  const set=activeCountries();
-  const all=Object.keys(counts).length;
-  const shown=Object.keys(counts).filter(c=>set.has(c)).length;
-  const rb=(v,lb)=>`<button class="fbtn ${String(VIEW.range)===String(v)?'active':''}" onclick="setRange('${v}')">${lb}</button>`;
-  const chips = !VIEW.showCC ? "" : `<div class="filters">
-    <button class="fbtn" onclick="ccSelectAll()">✓ Select all</button>
-    <button class="fbtn" onclick="ccSelectNone()">✗ None</button>`+
-    Object.entries(counts).sort((a,b)=>b[1]-a[1]||String(a[0]).localeCompare(String(b[0]))).map(([cc,n])=>
-    `<button class="fbtn ${set.has(cc)?'active':''}" ${n?"":'style="opacity:.45"'} onclick="toggleCC('${cc}')" title="${n} on this tab with the current filters · click to show/hide this country">${flag(cc)} ${esc(CC_NAME[cc]||cc)} · ${n}</button>`).join("")+`</div>`;
-  return `<div class="filters" style="margin-bottom:4px">
-      <button class="fbtn ${VIEW.showCC?'active':''}" onclick="toggleCCPanel()">🌍 Countries ${shown}/${all} ${VIEW.showCC?"▴":"▾"}</button>
-      <button class="fbtn ${VIEW.callable?'active':''}" onclick="toggleCallable()">☎ Callable now</button>
-      <span style="flex:1"></span>
-      ${rb("all","All 2026")}${rb(90,"90d")}${rb(30,"30d")}${rb(7,"7d")}
-      <input type="date" class="li" id="dfrom" style="padding:4px 8px;font-size:12px" value="${(VIEW.range&&VIEW.range.f)||""}" title="From date">
-      <input type="date" class="li" id="dto" style="padding:4px 8px;font-size:12px" value="${(VIEW.range&&VIEW.range.t)||""}" title="To date">
-      <button class="fbtn ${VIEW.range&&(VIEW.range.f||VIEW.range.t)?'active':''}" onclick="applyRange()">→ Apply</button></div>
-    ${chips}`;
-}
+/* the old stacked filter rows are gone: quick ranges live in the header
+   toolbar (render), everything else in the ⚙ Filters sheet (showFilters) */
 
 /* ---------- data loading ---------- */
 function derive(l){
@@ -644,10 +650,12 @@ async function loadData(delta){
   window.__archived = (people||[]).filter(p=>p.archived_at && !p.merged_into);
   LEADS = (people||[]).filter(p=>!p.merged_into && !p.archived_at).map(p=>{
     const mine = (tByP[p.id]||[]).sort((a,b)=>a.at<b.at?-1:1);
-    const t = tzInfo(p.phone);
+    // no Salesforce number? the Jira location's number still tells us the country
+    const t = tzInfo(p.phone) || tzInfo((((window.__locByPerson||{})[p.id]||[]).map(j=>j.phone).find(Boolean))||null);
     const tld = (p.email||"").split(".").pop().toLowerCase();
     const l = {
       id: p.id, sfId: p.sf_id, name: p.name, co: p.company||"", email: p.email||"", alt: p.alt_email||"", phone: p.phone||"",
+      contacts: Array.isArray(p.contacts)?p.contacts:[],
       altPhone: p.alt_phone||"", due: p.next_due||null, assigned: p.assigned_to||null,
       sf: p.sf_status, src: p.source||"", hub: p.hub_status||null,
       created: day(p.sf_created_at), la: p.sf_last_activity, sfTouches: p.sf_touches||0,
@@ -679,6 +687,8 @@ async function loadData(delta){
   const cByEmail = {}; (clientRows||[]).forEach(cl=>{ if(cl.email) cByEmail[cl.email]=cl; });
   LEADS.forEach(l=>{ l.client=null; });
   (clientRows||[]).forEach(cl=>{ if(cl.person_id && byId[cl.person_id]) byId[cl.person_id].client=cl; });
+  // country was unknown from the phone? Stripe's invoice address settles it
+  LEADS.forEach(l=>{ if((!l.cc||l.cc==="?") && l.client && l.client.country) l.cc = l.client.country==="GB"?"UK":l.client.country; });
   LEADS.forEach(l=>{
     if(!l.client && l.email && cByEmail[l.email.toLowerCase()]) l.client=cByEmail[l.email.toLowerCase()];
     if(!l.client && l.alt && cByEmail[l.alt.toLowerCase()]) l.client=cByEmail[l.alt.toLowerCase()];
@@ -703,7 +713,7 @@ async function loadData(delta){
     if(cl.person_id && byId[cl.person_id]) return;
     if(em && known.has(em)) return;
     if(em) known.add(em);
-    extras.push({pseudo:"client", name:cl.name||cl.email||cl.stripe_id, email:cl.email||"",
+    extras.push({pseudo:"client", name:cl.name||cl.email||cl.stripe_id, email:cl.email||"", cl,
       sub:eur(cl.total_paid,cl.currency)+" · "+cl.payments+"× paid"});
   });
   (ticketRows||[]).forEach(t=>{
@@ -722,7 +732,7 @@ const eur = (cents,cur) => (Math.round((cents||0)/100)).toLocaleString("de-DE") 
    reports, then the email ending as a last resort */
 function ccOfClient(cl){
   const lead = cl.person_id && byId[cl.person_id];
-  if(lead) return lead.cc;
+  if(lead && lead.cc && lead.cc!=="?") return lead.cc;   // "?" falls through to Stripe's answer
   if(cl.country) return cl.country==="GB" ? "UK" : cl.country;
   const tld=(cl.email||"").split(".").pop().toLowerCase();
   return TLD_CC[tld]||"?";
@@ -753,27 +763,35 @@ async function migrateLocal(){
 /* ---------- lead row ---------- */
 function leadRow(l, extra){
   const c = callable(l);
-  const tz = c ? `<span class="tz ${c.ok?'ok':'no'}"><span class="dot"></span>${c.cc} ${String(c.h).padStart(2,"0")}:00</span>` : "";
+  // no phone to compute local time from? the country alone still shows (Stripe/Jira know it)
+  const tz = c ? `<span class="tz ${c.ok?'ok':'no'}"><span class="dot"></span>${c.cc} ${String(c.h).padStart(2,"0")}:00</span>`
+    : (l.cc&&l.cc!=="?"?`<span class="tz">${flag(l.cc)} ${esc(l.cc)}</span>`:"");
   const chips = [
     l.hot?'<span class="chip" title="Real conversation (2+ min call or meeting) within the last 30 days" style="background:color-mix(in srgb,var(--crit) 14%,var(--surface))">🔥</span>':"",
     l.warm?'<span class="chip" title="Was warm: 2+ real conversations, but none in the last 30 days">💎</span>':"",
     (typeof fuGaveUp==="function"&&fuGaveUp(l))?'<span class="chip" title="Many attempts, never a real answer (give-up rule). Any new touch or real connect revives them.">👻</span>':"",
     l.due&&day(l.due)&&day(l.due)>TODAY?`<span class="chip" title="Personal reminder set: resurfaces then">⏰ ${day(l.due).toLocaleDateString(undefined,{day:"numeric",month:"short"})}</span>`:"",
-    l.client?`<span class="chip coupon" title="Paying client · ${esc(eur(l.client.total_paid,l.client.currency))}">💰 client</span>`:"",
+    // inside People's Clients view every row is a client: saying so is noise
+    (l.client&&!(CURRENT==="people"&&(window.__PF||"all")==="client"))?`<span class="chip coupon" title="Paying client · ${esc(eur(l.client.total_paid,l.client.currency))}">💰 client</span>`:"",
     l.covered?'<span class="chip" title="Their company already pays; this lead sits out of the chase lists (change it in the 🏢 group on their card)">💰 covered</span>':"",
     l.cp?`<span class="chip coupon ${l.cp.offer?"jump":""}" title="${esc(l.cp.code)}${l.cp.offer?" · click to copy the offer link":""}" ${l.cp.offer?`onclick="copyTxt('${esc(l.cp.offer)}','offer link');event.stopPropagation()"`:""}>🎟 ${esc(l.cp.val)}${l.cp.offer?" 🔗":""}</span>`
       :(l.coupon?'<span class="chip coupon">Coupon</span>':(/Book a Call/i.test(l.src)?'<span class="chip call">Book-a-call</span>':"")),
+    locsFor(l).length?`<span class="chip" title="Locations in Jira: contract, shipments, service">📍 ${locsFor(l).length}</span>`:"",
     l.assigned?`<span class="chip asg" title="Lead owner: ${esc(l.assigned)}">👤 ${esc(String(l.assigned).split("@")[0])}</span>`
       :(window.CANW!==false&&terrOwner(l.cc)?`<span class="chip jump" onclick="assignLead('${l.id}','${esc(terrOwner(l.cc))}');event.stopPropagation()" title="${esc(l.cc)} is in this person's territory. One click assigns; nothing happens by itself.">👤 suggest: ${esc(String(terrOwner(l.cc)).split("@")[0])}</span>`:""),
-    `<span class="chip stage">${esc(l.hub||(l.attempted?"No answer yet":l.stage))}</span>`
+    // a client's stage is "Won" by definition: saying it again is noise. Lost or anything odd still shows.
+    (isClientL(l)&&(l.hub||l.stage)==="Won")?"":`<span class="chip stage">${esc(l.hub||(l.attempted?"No answer yet":l.stage))}</span>`
   ].join("");
-  return `<div class="card" data-id="${l.id}"${extra&&extra.dim?' style="opacity:.55"':''}>
+  const rowPhone=l.phone||(extraPhones(l)[0]||{}).v||"";
+  return `<div class="card ${(window.__openLd||new Set()).has(l.id)?'open':''}" data-id="${l.id}"${extra&&extra.dim?' style="opacity:.55"':''}>
     <div class="row" onclick="toggle('${l.id}')">
       ${window.__SEL&&window.__SEL.on?`<input type="checkbox" ${window.__SEL.ids.has(l.id)?"checked":""} onclick="selToggle('${l.id}');event.stopPropagation()" style="width:16px;height:16px;flex:none;cursor:pointer">`:""}
       <div class="who"><span class="nm">${esc(l.name)}</span>${l.internal?' <span class="chip">internal</span>':""}
-        <div class="co">${esc(l.co||l.email)}</div></div>
+        <div class="co">${esc(l.co||"")}${l.co&&l.email?" · ":""}${esc(l.email||"")}</div></div>
+      ${l.email?`<button class="btn" style="padding:3px 8px;font-size:11.5px" onclick="copyTxt('${esc(l.email)}','email');event.stopPropagation()" title="Copy email">📋 ✉</button>`:""}
+      ${rowPhone?`<button class="btn" style="padding:3px 8px;font-size:11.5px" onclick="copyTxt('${esc(rowPhone)}','phone number');event.stopPropagation()" title="Copy phone${l.phone?"":" (from Jira)"}">📋 ☎</button>`:""}
       ${chips}${tz}
-      <span class="badge-t" title="Touches logged (Salesforce tasks + hub logs)">${l.touches}✦</span>
+      ${l.touches?`<span class="badge-t" title="Touches logged (Salesforce tasks + hub logs)">${l.touches}✦</span>`:""}
       <span class="meta ${extra&&extra.cls||''}">${extra?extra.txt:relTime(l)}</span>
     </div>
     <div class="detail">
@@ -782,14 +800,11 @@ function leadRow(l, extra){
       <div class="left">
         <div class="acts">
           ${l.phone?`<a class="btn" href="https://wa.me/${l.phone.replace(/\D/g,"")}" target="_blank">💬 WhatsApp</a>`:""}
-          <button class="btn" onclick="vcf('${l.id}');event.stopPropagation()">💾 .vcf</button>
-          ${window.CANW!==false?`<button class="btn" onclick="mergeLead('${l.id}');event.stopPropagation()" title="Merge a duplicate person into this one">⇄ Merge</button>`:""}
-          ${window.CANW!==false&&!l.sfId&&l.createdBy===ME?`<button class="btn" onclick="archiveLead('${l.id}');event.stopPropagation()" title="Put this lead away without deleting anything. Restorable from People → Archived. Only you can archive it because you created it.">🗃 Archive</button>`:""}
+          ${logMenu(l)}
+          ${newMenu(l)}
+          ${moreMenu(l)}
         </div>
         ${window.CANW!==false?`<div class="acts" style="margin-top:8px">
-          <button class="btn" onclick="waCall('${l.id}');event.stopPropagation()">+ WA call</button>
-          <button class="btn" onclick="waMsg('${l.id}');event.stopPropagation()">+ WA message</button>
-          <button class="btn" onclick="logCall('${l.id}');event.stopPropagation()">+ Log call</button>
           <select class="st" onchange="assignLead('${l.id}',this.value);this.selectedIndex=0" onclick="event.stopPropagation()" title="Lead owner">
             <option value="">👤 ${l.assigned?esc(String(l.assigned).split("@")[0]):"Assign lead…"}</option>
             <option value="__me">→ me</option>
@@ -824,7 +839,7 @@ function leadRow(l, extra){
           <textarea class="note" id="nt-${l.id}" placeholder="Add a note…" rows="1"></textarea>
           <button class="btn" onclick="addNote('${l.id}')">Add</button>
         </div>`:""}
-        <div class="meta">Source: ${esc(l.src||"?")} · Created ${l.created?l.created.toLocaleDateString():"?"} · ${esc(l.phone||"no phone")}${l.alt?` · also: ${esc(l.alt)}`:""}
+        <div class="meta">Source: ${esc(l.src||"?")}${l.created?` · Created ${l.created.toLocaleDateString()}`:""} · ${esc(l.phone||"no phone")}${l.alt?` · also: ${esc(l.alt)}`:""}
           ${l.sfId&&ORG().salesforceUrl?` · <a class="sflink" href="${esc(ORG().salesforceUrl)}/lightning/r/Lead/${l.sfId}/view" target="_blank" onclick="event.stopPropagation()">Salesforce ↗</a>`:""}${l.client&&l.client.stripe_id?` · <a class="sflink" href="https://dashboard.stripe.com/customers/${esc(l.client.stripe_id)}" target="_blank" onclick="event.stopPropagation()">Stripe ↗</a>`:""}</div>
       </div>
     </div>
@@ -890,6 +905,12 @@ const sysLink = em => em&&ORG().sysCustomerUrl ? ORG().sysCustomerUrl.replace("{
 const CLOSED_KID=/^(DELIVERED|CANCELED|LOST \/ RETURNED|RK_CLOSED|Done)$/i;
 const kidOpen=k=>!k.jira_resolved&&!CLOSED_KID.test(k.status||"");
 const dstr=d=>d?new Date(d+"T00:00:00").toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}):null;
+/* the location fold remembers being open: jxOpen's re-render used to rebuild it
+   closed (and the whole card with it) on the very first expand */
+window.locTog = (key, open) => {
+  const s=window.__openLoc||(window.__openLoc=new Set());
+  if(open){ s.add(key); jxOpen(key); } else s.delete(key);
+};
 /* per-location detail is fetched on first expand: full child history + comments */
 window.jxOpen = async key => {
   const s=window.__jx||(window.__jx={});
@@ -927,7 +948,7 @@ function locBlock(l){
     const dates=[j.test_start?"test "+dstr(j.test_start)+" → "+(dstr(j.test_end)||"?"):null,
       j.contract_renewal?"renewal "+dstr(j.contract_renewal):null,
       j.contract_termination?"terminated "+dstr(j.contract_termination):null].filter(Boolean).join(" · ");
-    return `<details class="tbl" ontoggle="if(this.open)jxOpen('${j.key}')">
+    return `<details class="tbl" ${(window.__openLoc||new Set()).has(j.key)?"open":""} ontoggle="locTog('${j.key}',this.open)">
       <summary>📍 ${esc(j.company||j.summary||j.key)} <span class="chip stage">${esc((j.phase||"").replace(/^CS_/,"").replace(/_/g," ").toLowerCase())}</span>
         ${j.payment_problems?'<span class="chip" style="color:var(--crit)" title="Jira has the payment problems flag set">⚠ payment flag</span>':""}
         ${openSvc?`<span class="chip">🔧 ${openSvc} open service</span>`:""}
@@ -1252,6 +1273,9 @@ window.opsRestore = async id => {
 /* lifecycle: client (paid), lead (came in via sales), support-only (only ever wrote to support) */
 function lifecycleOf(l){
   if(l.client) return "client";
+  // Jira knows customers Stripe never sees: a location ticket or shipment/service
+  // work means a contract exists (bank-transfer payers, historic accounts)
+  try{ if(locsFor(l).length || orphanKidsFor(l).length) return "client"; }catch(e){}
   const leadish = l.sfId || l.coupon || /website|discount|book|calendly|checkout|email/i.test(l.src||"");
   if(!leadish && ticketsOf(l).length) return "support";
   return "lead";
@@ -1261,22 +1285,29 @@ function phead(l){
   const tks=ticketsOf(l), openT=tks.filter(t=>t.state!=="resolved").length;
   const actC=l.coupons.filter(c=>c.active).length;
   const life=lifecycleOf(l);
-  const lchip = life==="client"?'<span class="chip life-client">💰 client</span>'
+  const lchip = life==="client"?`<span class="chip life-client" title="${l.client?"Paying client in Stripe":"Customer in Jira (contract, shipments or service); no Stripe payments on file - likely pays by bank transfer"}">💰 client</span>`
     : life==="support"?'<span class="chip">🎧 support-only</span>':'<span class="chip life-lead">✦ lead</span>';
   /* contacts first (the phone is ringing, grab email + number), then status,
      then shortcuts. Anything with a zero count stays invisible. */
   return `<div class="phead" onclick="event.stopPropagation()">
     <div class="pcontacts">
-      ${l.email?`<span class="chip jump" onclick="copyTxt('${esc(l.email)}','email')" title="Click to copy">✉ ${esc(l.email)}</span>`:""}
-      ${l.phone?`<span class="chip jump" onclick="copyTxt('${esc(l.phone)}','phone number')" title="Click to copy">☎ ${esc(l.phone)}</span>`:""}
-      ${l.alt?`<span class="chip jump" onclick="copyTxt('${esc(l.alt)}','second email')" title="Second email, kept from a merge. Click to copy">✉ ${esc(l.alt)}</span>`:""}
-      ${l.altPhone?`<span class="chip jump" onclick="copyTxt('${esc(l.altPhone)}','second phone')" title="Second phone, kept from a merge. Click to copy">☎ ${esc(l.altPhone)}</span>`:""}
+      ${(()=>{ /* no primary? the best extra (e.g. the Jira number) shows as THE
+           contact instead of hiding behind a +1 nobody understands */
+        const one=(kind,icon,label)=>{
+          const ex=(kind==="email"?extraEmails:extraPhones)(l);
+          const prim=kind==="email"?l.email:l.phone;
+          const main=prim?{v:prim}:(ex[0]||null); const rest=prim?ex:ex.slice(1);
+          return (main?`<span class="chip jump" onclick="copyTxt('${esc(main.v)}','${label}')" title="Click to copy${main.note?" · "+esc(main.note):""}">${icon} ${esc(main.v)}${main.note&&/Jira/i.test(main.note)?' <span class="meta">Jira</span>':""}</span>`:"")
+            +(rest.length?`<span class="chip jump" onclick="cdOpen(event,'${l.id}','${kind}',${prim?0:1})" title="${rest.length} more. Click to see, copy or pin as primary">+${rest.length} ▾</span>`:"");
+        };
+        return one("email","✉","email")+one("phone","☎","phone number"); })()}
+      ${window.CANW!==false?`<span class="chip jump" onclick="editContacts('${l.id}')" title="Edit name, company, phone; add more emails and numbers">✎ edit</span>`:""}
     </div>
     ${lchip}
-    ${l.hub||l.stage?`<span class="chip stage">${esc(l.hub||l.stage)}</span>`:""}
+    ${(l.hub||l.stage)&&!(life==="client"&&(l.hub||l.stage)==="Won")?`<span class="chip stage">${esc(l.hub||l.stage)}</span>`:""}
     ${l.gid&&(window.__groupBy||{})[l.gid]?`<span class="chip jump" onclick="groupDialog(${l.gid})" title="Company group: several people, one company. Click for members and the covered switch.">🏢 ${esc((window.__groupBy||{})[l.gid].name)} · ${((window.__groupMembers||{})[l.gid]||[]).length}${((window.__groupMembers||{})[l.gid]||[]).some(id=>(byId[id]||{}).client)?" · 💰 pays":""}</span>`:""}
     ${l.due&&day(l.due)&&day(l.due)>TODAY?`<span class="chip" title="Personal reminder set">⏰ ${day(l.due).toLocaleDateString(undefined,{day:"numeric",month:"short"})}</span>`:""}
-    ${l.client?`<span class="chip jump life-client" onclick="jumpSearch('clients','${esc(l.client.email||l.email||l.name)}')" title="Open in Clients">💰 ${esc(eur(l.client.total_paid,l.client.currency))} · ${l.client.payments}× paid →</span>`:""}
+    ${l.client?`<span class="chip life-client" title="Every payment is in the timeline below; Stripe ↗ opens the customer">💰 ${esc(eur(l.client.total_paid,l.client.currency))} · ${l.client.payments}× paid</span>`:""}
     ${(()=>{ // "failed" only when Stripe has given up; a scheduled retry is just pending
       const fp=ppOf(l); if(!fp.length) return "";
       const rt=fp.filter(p=>p.next_retry&&new Date(p.next_retry)>new Date()).length, fl=fp.length-rt;
@@ -1288,13 +1319,149 @@ function phead(l){
     ${actC?`<span class="chip jump coupon" onclick="jumpSearch('coupons','${esc(l.email||l.name)}')" title="Open in Coupons">🎟 ${actC} active →</span>`:""}
     ${l.refBy&&byId[l.refBy]?`<span class="chip jump" onclick="refOpen('${l.id}')" title="Referred by ${esc((byId[l.refBy]||{}).name||"")}. Click to open or unlink.">🤝 by ${esc(String((byId[l.refBy]||{}).name||"").split(" ")[0])}</span>`:""}
     ${((window.__refKids||{})[l.id]||[]).length?`<span class="chip jump" onclick="refKids('${l.id}')" title="People this person referred">🤝 referred ${((window.__refKids||{})[l.id]||[]).length} →</span>`:""}
-    ${window.CANW!==false?`${!l.refBy&&/empfehl|referr/i.test(l.src||"")?`<span class="chip jump" style="color:var(--serious)" onclick="refSet('${l.id}')" title="The source says referral but nobody recorded WHO referred them. One click fixes that.">🤝 referred: by whom?</span>`:(!l.refBy?`<span class="chip jump" onclick="refSet('${l.id}')" title="Record who referred this person (heard on a call, e.g. 'Singh sent me')">🤝 referred by…</span>`:"")}
-    ${!l.gid?`<span class="chip jump" onclick="groupStart('${l.id}')" title="Band this person together with a colleague at the same company (nothing is merged)">🏢 group…</span>`:""}
-    <span class="chip jump" onclick="newTicket('${l.id}')" title="Open a support ticket for this person">🎫 ＋ ticket</span>
-    <span class="chip jump" onclick="newCoupon('${l.id}')" title="Issue a discount code through the admin panel">🎟 ＋ coupon</span>
-    ${!locsFor(l).length?`<span class="chip jump" onclick="linkLocation('${l.id}')" title="Attach one of the Jira locations to this person">📍 link…</span>`:""}`:""}
+    ${window.CANW!==false&&!l.refBy&&/empfehl|referr/i.test(l.src||"")?`<span class="chip jump" style="color:var(--serious)" onclick="refSet('${l.id}')" title="The source says referral but nobody recorded WHO referred them. One click fixes that.">🤝 referred: by whom?</span>`:""}
   </div>`;
 }
+/* every contact beyond the primary: merge-kept alt slots, manual extras
+   (people.contacts) and whatever Jira knows that Salesforce never got */
+function extraOf(l, kind){
+  const primary = kind==="email"?l.email:l.phone;
+  const seen=new Set(primary?[primary]:[]), out=[];
+  const add=(v,note,extra)=>{ if(!v||seen.has(v)) return; seen.add(v); out.push(Object.assign({v,note},extra||{})); };
+  add(kind==="email"?l.alt:l.altPhone, "kept from a merge", {alt:true});
+  (l.contacts||[]).filter(c=>c.t===kind&&c.v).forEach(c=>add(c.v, c.note||""));
+  try{
+    locsFor(l).forEach(j=>add(kind==="email"?j.contact_email:j.phone, "from Jira "+j.key));
+    orphanKidsFor(l).forEach(k=>add(kind==="email"?k.contact_email:k.phone, "from Jira "+k.key));
+  }catch(e){}
+  return out;
+}
+const extraEmails = l => extraOf(l,"email");
+const extraPhones = l => extraOf(l,"phone");
+/* the +N chip's dropdown: copyable rows, each pinnable as the new primary */
+window.cdClose = () => { const d=document.getElementById("cdrop"); if(d) d.remove(); };
+window.cdOpen = (ev, pid, kind, skip) => {
+  ev.stopPropagation();
+  const was=document.getElementById("cdrop"), again=was&&was.dataset.for===pid+kind;
+  cdClose(); if(again) return;                        // second click on the same chip just closes
+  const l=byId[pid]; if(!l) return;
+  // skip=1 when the first extra already shows as the visible contact chip
+  const list = (kind==="email"?extraEmails(l):extraPhones(l)).slice(skip||0);
+  if(!list.length) return;
+  const d=document.createElement("div"); d.id="cdrop"; d.dataset.for=pid+kind;
+  d.innerHTML = list.map(c=>`<div class="qhit" onclick="copyTxt('${esc(c.v)}','${kind==="email"?"email":"phone number"}')" title="Click to copy${c.note?" · "+esc(c.note):""}">
+      <span style="flex:1;overflow-wrap:anywhere">${kind==="email"?"✉":"☎"} ${esc(c.v)}</span>
+      ${window.CANW!==false?`<button class="btn" onclick="event.stopPropagation();cdPin('${pid}','${kind}','${esc(c.v)}')" title="Make this the primary. The current primary moves into the extras, nothing is deleted.">📌 pin</button>`:""}
+    </div>`).join("");
+  document.body.appendChild(d);
+  const r=(ev.currentTarget&&ev.currentTarget.getBoundingClientRect)?ev.currentTarget.getBoundingClientRect():{left:ev.clientX,bottom:ev.clientY};
+  d.style.top=Math.max(8, Math.min(window.innerHeight-d.offsetHeight-8, r.bottom+4))+"px";
+  d.style.left=Math.max(8, Math.min(window.innerWidth-d.offsetWidth-8, r.left))+"px";
+  setTimeout(()=>document.addEventListener("click", cdClose, {once:true}),0);
+};
+window.cdPin = async (pid, kind, v) => {
+  cdClose();
+  const l=byId[pid]; if(!l) return;
+  const what = kind==="email"?"email":"phone number";
+  if(!await hubConfirm("📌 Make "+esc(v)+" the primary "+what+"?",
+    kind==="email"
+      ? "The current primary ("+esc(l.email||"none")+") moves into the extra contacts, nothing is deleted. Heads-up: the sync engines match this person by primary email."
+      : "The current number ("+esc(l.phone||"none")+") moves into the extra contacts, nothing is deleted.","Pin as primary")) return;
+  /* the pinned value leaves the extras; the old primary joins them - never dropped */
+  const contacts=(l.contacts||[]).filter(c=>!(c.t===kind&&c.v===v));
+  const patch={contacts};
+  if(kind==="email"){
+    if(l.email&&l.email!==v) contacts.push({t:"email", v:l.email, note:"was primary"});
+    patch.email=v;
+    if(l.alt===v) patch.alt_email=null;
+  } else {
+    if(l.phone&&l.phone!==v) contacts.push({t:"phone", v:l.phone, note:"was primary"});
+    patch.phone=v; patch.phone_norm=v.replace(/\D/g,"");
+    if(l.altPhone===v){ patch.alt_phone=null; patch.alt_phone_norm=null; }
+  }
+  const {error}=await sb.from("people").update(patch).eq("id",pid);
+  if(error){ hubAlert("Pin failed", esc(error.message)); return; }
+  logAudit("contact",{person_id:pid, detail:"primary "+what+" → "+v});
+  if(kind==="email"){ if(l.alt===v) l.alt=""; l.email=v; }
+  else { if(l.altPhone===v) l.altPhone=""; l.phone=v; const t=tzInfo(v); if(t) l.cc=t[0]; }
+  l.contacts=contacts;
+  toast("Pinned as primary"); render(false);
+};
+/* the create-type actions live in one ＋ New… menu instead of loose chips */
+window.cardMenu = (id, v) => {
+  if(!v) return;
+  const l=byId[id]||{};
+  const fns={ wacall:waCall, wamsg:waMsg, log:logCall, ticket:newTicket, coupon:newCoupon,
+    loc:linkLocation, group:groupStart, ref:refSet, vcf:vcf, merge:mergeLead, archive:archiveLead };
+  if(fns[v]) fns[v](id);
+};
+const newMenu = l => window.CANW===false ? "" :
+  `<select class="st" onchange="cardMenu('${l.id}',this.value);this.selectedIndex=0" onclick="event.stopPropagation()" title="Create something for this person">
+    <option value="">＋ New…</option>
+    <option value="ticket">🎫 support ticket</option>
+    <option value="coupon">🎟 coupon</option>
+    ${!locsFor(l).length?`<option value="loc">📍 link a location</option>`:""}
+    ${!l.gid?`<option value="group">🏢 company group</option>`:""}
+    ${!l.refBy?`<option value="ref">🤝 referred by…</option>`:""}
+  </select>`;
+const moreMenu = l =>
+  `<select class="st" onchange="cardMenu('${l.id}',this.value);this.selectedIndex=0" onclick="event.stopPropagation()" title="More actions">
+    <option value="">⋯</option>
+    <option value="vcf">💾 save contact (.vcf)</option>
+    ${window.CANW!==false?`<option value="merge">⇄ merge a duplicate</option>`:""}
+    ${window.CANW!==false&&!l.sfId&&l.createdBy===ME?`<option value="archive">🗃 archive</option>`:""}
+  </select>`;
+const logMenu = l => window.CANW===false ? "" :
+  `<select class="st" onchange="cardMenu('${l.id}',this.value);this.selectedIndex=0" onclick="event.stopPropagation()" title="Log a call or message">
+    <option value="">📞 Log…</option>
+    <option value="wacall">+ WA call</option>
+    <option value="wamsg">+ WA message</option>
+    <option value="log">+ phone call</option>
+  </select>`;
+
+/* edit a person's basics and keep any number of extra emails/phones (stored in
+   people.contacts jsonb; the main email stays untouched because syncs match on it) */
+window.editContacts = pid => {
+  const l=byId[pid]; if(!l) return;
+  const old=document.getElementById("mergeov"); if(old) old.remove();
+  const ov=document.createElement("div"); ov.id="mergeov";
+  ov.innerHTML=`<div class="mcard"><h3>✎ ${esc(l.name||"Edit person")}</h3>
+    <input class="li" id="ec-name" value="${esc(l.name||"")}" placeholder="Name">
+    <input class="li" id="ec-co" value="${esc(l.co||"")}" placeholder="Company">
+    <input class="li" id="ec-phone" value="${esc(l.phone||"")}" placeholder="Main phone">
+    <div class="meta">Main email stays as is (${esc(l.email||"none")}): syncs match on it. Extra emails and numbers:</div>
+    <div id="ec-list"></div>
+    <div style="display:flex;gap:6px">
+      <select class="st" id="ec-type"><option value="email">✉ email</option><option value="phone">☎ phone</option></select>
+      <input class="li" id="ec-val" placeholder="name@company.com or +49…" style="flex:1;min-width:0">
+      <button class="btn" onclick="ecAdd()">＋ Add</button></div>
+    <div class="acts" style="justify-content:flex-end">
+      <button class="btn" onclick="document.getElementById('mergeov').remove()">Cancel</button>
+      <button class="btn primary" onclick="ecSave('${pid}')">Save</button></div></div>`;
+  ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
+  document.body.appendChild(ov);
+  window.__ec=(l.contacts||[]).map(c=>({...c}));
+  window.__ecRe=()=>{ document.getElementById("ec-list").innerHTML=window.__ec.map((c,i)=>
+    `<div style="display:flex;gap:6px;align-items:center;padding:2px 0"><span class="chip">${c.t==="phone"?"☎":"✉"} ${esc(c.v)}</span><button class="btn" onclick="ecDel(${i})">🗑</button></div>`).join("")||'<div class="meta">none yet</div>'; };
+  window.__ecRe();
+};
+window.ecDel = i => { window.__ec.splice(i,1); window.__ecRe(); };
+window.ecAdd = () => {
+  const t=document.getElementById("ec-type").value, v=(document.getElementById("ec-val").value||"").trim();
+  if(!v) return;
+  if(t==="email"&&!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)){ hubAlert("Not an email","That doesn't look like an email address."); return; }
+  window.__ec.push({t,v}); document.getElementById("ec-val").value=""; window.__ecRe();
+};
+window.ecSave = async pid => {
+  const l=byId[pid]; if(!l) return;
+  const name=(document.getElementById("ec-name").value||"").trim()||l.name;
+  const co=(document.getElementById("ec-co").value||"").trim()||null;
+  const phone=(document.getElementById("ec-phone").value||"").trim()||null;
+  const {error}=await sb.from("people").update({name, company:co, phone, contacts:window.__ec}).eq("id",pid);
+  if(error){ hubAlert("Save failed", esc(error.message)); return; }
+  l.name=name; l.co=co||""; l.phone=phone||""; l.contacts=window.__ec;
+  document.getElementById("mergeov").remove(); try{toast("Saved ✓");}catch(e){} render(false);
+};
 /* one person, whole story: notes, calls, WA, emails, coupons, tickets, payments in one thread */
 function timeline(l){
   const tks=ticketsOf(l);
@@ -1315,12 +1482,24 @@ function timeline(l){
     ...tks.map(t=>({d:String(t.opened_at).slice(0,10), i:"🎫",
       t:"Support: "+(t.subject||"")+" · "+String(t.state).replace(/_/g," ")})),
     ...(window.PROFILE&&PROFILE.role==="admin"?((window.__auditBy||{})[l.id]||[]):[]).map(a=>({d:String(a.at).slice(0,10), i:"✏️",
-      t:(a.who?String(a.who).split("@")[0]+": ":"")+({status:"status",assign:"owner",merge:"merged",unmerge:"merge undone",reminder:"reminder"}[a.action]||a.action)
+      t:(a.who?String(a.who).split("@")[0]+": ":"")+({status:"status",assign:"owner",merge:"merged",unmerge:"merge undone",reminder:"reminder",contact:"contact"}[a.action]||a.action)
         +(a.detail?" · "+a.detail:""),
       undoId:(a.action==="merge"&&a.undo)?a.id:null})),
     ...(l.client?[{d:String(l.client.first_paid_at||"").slice(0,10), i:"🎉",
       t:"LEAD → CLIENT: first payment. "+l.client.payments+" payment"+(l.client.payments>1?"s":"")+" · "
-        +eur(l.client.total_paid,l.client.currency)+" total so far. Below this line is the lead journey, above is life as a client."}]:[])
+        +eur(l.client.total_paid,l.client.currency)+" total so far. Below this line is the lead journey, above is life as a client."}]:[]),
+    /* the client story continues after conversion: every Stripe payment and
+       every failing invoice, same data the Clients and Operations tabs show */
+    ...(l.client&&l.client.raw&&Array.isArray(l.client.raw.pays)?l.client.raw.pays.map(p2=>{
+      const dt=new Date(p2.t*1000);
+      return {d:dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0"),
+        i:"💶", t:"Payment "+eur(p2.amt,l.client.currency)+(p2.inv?" · invoice "+String(p2.inv).slice(-10):"")};
+    }):[]),
+    ...(typeof ppOf==="function"?ppOf(l):[]).map(p=>{
+      const retry=p.next_retry&&new Date(p.next_retry)>new Date();
+      return {d:String(p.invoice_created||"").slice(0,10), i:"⚠",
+        t:(retry?"Payment retrying · ":"Payment failed · ")+Math.round((p.amount||0)/100)+"€"+(p.reason?" · "+p.reason:"")};
+    })
   ].filter(e=>e.d).sort((a,b)=>b.d.localeCompare(a.d));
 }
 window.toggleC = id => {
@@ -1486,7 +1665,16 @@ function relTime(l){
   if(l.lastPast) return l.quiet===0?"today":l.quiet+"d ago";
   return "never touched";
 }
-window.toggle = id => { const c=document.querySelector(`.card[data-id="${id}"]`); if(c) c.classList.toggle("open"); };
+/* open cards survive re-renders (auto-refresh, background fetches): state lives
+   in a Set, not only in the DOM class the next render would wipe */
+window.toggle = id => {
+  const s=window.__openLd||(window.__openLd=new Set());
+  const open=!s.has(id);
+  if(open) s.add(id); else s.delete(id);
+  // the same person can sit in two lists (coupon expiring + due): keep every
+  // copy in the same state, and never toggle "the first match" by accident
+  document.querySelectorAll(`.card[data-id="${id}"]`).forEach(c=>c.classList.toggle("open",open));
+};
 function flash(id){ const s=document.getElementById("sv-"+id); if(s){s.style.visibility="visible"; setTimeout(()=>s.style.visibility="hidden",1500);} }
 /* who did what: decisions made in the hub are recorded, so questions like
    "who marked this Lost?" or "who merged these two?" have an answer later */
@@ -1661,26 +1849,26 @@ window.vcfAll = () => {
 /* ---------- pools ---------- */
 /* CHASE: every list that asks for a call/mail must skip Won/Lost/Junk AND
    leads marked "covered by the company's paying client" (group feature) */
-const CHASE = l => ACTIVE(l.stage) && !l.covered;
+/* his rule: a client is NEVER chased like a lead - Stripe clients and Jira-known
+   ones (contract, shipments) alike. The one exception lives in couponsExpiring:
+   a client who requests a fresh discount started a sales conversation. */
+const isClientL = l => { try{ return lifecycleOf(l)==="client"; }catch(e){ return !!l.client; } };
+const CHASE = l => ACTIVE(l.stage) && !l.covered && !isClientL(l);
 const worked     = l => !l.isNew || l.attempted;
-const newLeads   = () => LEADS.filter(l=>l.isNew && !l.attempted && !l.internal && !l.covered).sort((a,b)=>b.created-a.created);
+const newLeads   = () => LEADS.filter(l=>l.isNew && !l.attempted && !l.internal && !l.covered && !isClientL(l)).sort((a,b)=>b.created-a.created);
 const attemptedL = () => LEADS.filter(l=>l.attempted && CHASE(l) && !l.internal)
                           .sort((a,b)=>(b.lastPast||b.created)-(a.lastPast||a.created));
 const followups  = () => LEADS.filter(l=>worked(l) && CHASE(l) && !l.internal)
                           .sort((a,b)=>(b.lastPast||b.created)-(a.lastPast||a.created));
-const dueToday   = () => LEADS.filter(l=>!l.internal && CHASE(l) && (
-                          (l.planned && l.planned<=TODAY) ||
-                          (worked(l) && l.quiet>=CAD().resurface && l.quiet<CAD().quiet && l.touches<5)));
+/* dueToday/goneQuiet retired: Today and Follow-ups share dueNow()/fuQuiet now */
 const planned    = () => LEADS.filter(l=>l.planned && l.planned>TODAY && !l.internal && CHASE(l)).sort((a,b)=>a.planned-b.planned);
-const goneQuiet  = () => LEADS.filter(l=>worked(l) && CHASE(l) && !l.internal && l.quiet>=CAD().quiet)
-                          .sort((a,b)=>b.quiet-a.quiet);
-const coupons    = () => LEADS.filter(l=>(l.coupons.length||l.coupon) && !l.internal && !l.client)
+const coupons    = () => LEADS.filter(l=>(l.coupons.length||l.coupon) && !l.internal && (!isClientL(l) || l.cp))
                           .sort((a,b)=>{
                             if(a.cp && b.cp) return a.cp.exp-b.cp.exp;
                             if(a.cp) return -1; if(b.cp) return 1;
                             return (b.created||0)-(a.created||0);
                           });
-const couponsExpiring = () => LEADS.filter(l=>!l.internal && !l.client && CHASE(l) && l.cp && daysTo(l.cp.exp)<=7)
+const couponsExpiring = () => LEADS.filter(l=>!l.internal && !l.covered && l.cp && daysTo(l.cp.exp)<=7 && (isClientL(l) || CHASE(l)))
                           .sort((a,b)=>a.cp.exp-b.cp.exp);
 /* abandoned checkout: they were paying and stopped; hottest chase list there is */
 const cartLeads  = () => LEADS.filter(l=>!l.internal && !l.client && CHASE(l) && /Checkout/i.test(l.src||""))
@@ -1698,7 +1886,10 @@ const neverConnected = l => !l.logs.some(g=>g.kind==="call" && (!g.detail || !/n
 const fuGaveUp    = l => !l.hot && !l.client && neverConnected(l) && (
      (l.sf==="call_na") ||
      (["New","Contacted"].includes(l.stage) && l.logs.filter(g=>g.kind==="call").length >= CAD().giveup));
+const fuQuiet     = l => l.quiet>=CAD().quiet;   // worked long ago, nobody's touched them in weeks
 const fuDue       = arr => arr.filter(l=>!fuSnoozed(l) && !fuScheduled(l) && !fuGaveUp(l));
+/* THE due number: one definition, used by Today, Follow-ups and both badges */
+const dueNow      = arr => fuDue(arr).filter(l=>!fuQuiet(l));
 
 /* ---------- panels ---------- */
 function bars(pairs, colors, total){
@@ -1742,51 +1933,110 @@ const applyQ = arr => {
   return v.filter(l=>matchLead(l,q));
 };
 
+/* Money: the Stripe book of business, a report section inside Reports. Rows
+   open the person card (the ONE detail view); no second mini-detail anymore. */
+function moneySection(){
+  const q=(document.getElementById("q").value||"").toLowerCase().trim();
+  const set=activeCountries();
+  const rbC = rangeBounds();
+  const cs=(window.__clients||[]).filter(cl=>
+    (!q||[cl.name,cl.email].some(v=>(v||"").toLowerCase().includes(q)))
+    && set.has(ccOfClient(cl))
+    && (!rbC || (cl.first_paid_at && (!rbC.from || new Date(cl.first_paid_at)>=rbC.from)
+                                  && (!rbC.to || new Date(cl.first_paid_at)<=rbC.to))));
+  const soC=(window.__SORTX||{}).clients||"total";
+  cs.sort(soC==="mrr"?(a,b)=>(b.mrr||0)-(a.mrr||0)
+    :soC==="last"?(a,b)=>String(b.last_paid_at||"").localeCompare(String(a.last_paid_at||""))
+    :(a,b)=>(b.total_paid||0)-(a.total_paid||0));
+  if(((window.__SORTDIR||{}).money||"desc")==="asc") cs.reverse();
+  const totalRev=cs.reduce((a,c)=>a+(c.total_paid||0),0);
+  const firsts=cs.map(c=>c.first_paid_at).filter(Boolean).map(d=>new Date(d));
+  const monthsActive=Math.max(1,firsts.length?Math.round((Date.now()-Math.min(...firsts))/2592000000):1);
+  const monthly=totalRev/monthsActive;
+  return `<h2>💶 Money</h2>
+  <p class="hint">Everyone who paid, straight from Stripe. Country and date filters apply (date = first payment, so ranges show new-client cohorts). Click a row for the full person card: payments, locations, tickets, lead story. Individual receipts sit in the card's timeline and in Stripe.</p>
+  <div class="tiles">
+    <div class="tile"><div class="v">${cs.length}</div><div class="l">Paying clients</div></div>
+    <div class="tile"><div class="v">${eur(totalRev)}</div><div class="l">Collected, all time</div></div>
+    <div class="tile"><div class="v">${eur(totalRev/Math.max(1,cs.length))}</div><div class="l">Avg per client</div></div>
+    <div class="tile"><div class="v">${eur(monthly)}</div><div class="l">Monthly run-rate</div></div>
+    <div class="tile"><div class="v">${eur(monthly*12)}</div><div class="l">Projected 12 months</div></div>
+  </div>
+  <div class="filters">${sortSelX("clients",[["total","Sort: total paid"],["mrr","Sort: MRR"],["last","Sort: last payment"]],"total")}
+    <button class="fbtn" onclick="window.__SORTDIR=window.__SORTDIR||{};window.__SORTDIR.money=(window.__SORTDIR.money||'desc')==='desc'?'asc':'desc';render(false)" title="Flip the sort order">${((window.__SORTDIR||{}).money||"desc")==="desc"?"↓ high to low":"↑ low to high"}</button></div>
+  ${cs.map(cl=>{
+    const lead = (cl.person_id&&byId[cl.person_id]) || null;
+    const last = cl.last_paid_at? daysAgo(new Date(String(cl.last_paid_at).slice(0,10)+"T00:00:00")) : null;
+    return `<div class="card"><div class="row" ${lead?`onclick="openPerson('${lead.id}')" title="Open the person card"`:'style="cursor:default"'}>
+      <div class="who"><span class="nm">💰 ${esc(cl.name||cl.email||cl.stripe_id)}</span>
+        <div class="co">${esc(cl.email||"")}</div></div>
+      <span class="chip" title="Successful Stripe payments only">${cl.payments}× paid ✓</span>
+      <a class="btn" href="https://dashboard.stripe.com/customers/${esc(cl.stripe_id)}" target="_blank" title="Open in Stripe" onclick="event.stopPropagation()">Stripe ↗</a>
+      ${cl.email?`<button class="btn" onclick="copyTxt('${esc(cl.email)}','email');event.stopPropagation()" title="Copy email">📋 ✉</button>`:""}
+      <span class="badge-t">${eur(cl.total_paid,cl.currency)}</span>
+      <span class="meta">${last===null?"":(last===0?"paid today":"paid "+last+"d ago")}</span>
+    </div></div>`;
+  }).join("")||'<div class="empty">No paying clients found</div>'}`;
+}
+/* The last seven days: real activity, not statuses. Lives in Reports. */
+function weeklySection(){
+  const w=weekStats(); const names=Object.keys(w.per).sort();
+  return `<h2>The last seven days</h2>
+  <p class="hint">What was actually done since ${w.since.toLocaleDateString(undefined,{day:"numeric",month:"short"})}: real activity, not statuses. The funnel shows where leads stand; this shows what the team did.</p>
+  <div class="tiles">
+    <div class="tile"><div class="v">${Object.values(w.per).reduce((a,x)=>a+x.conv,0)}</div><div class="l">Real conversations</div><div class="s">2+ minutes, the number that matters</div></div>
+    <div class="tile"><div class="v">${Object.values(w.per).reduce((a,x)=>a+x.attempts,0)}</div><div class="l">Call attempts</div><div class="s">${Object.values(w.per).reduce((a,x)=>a+x.answered,0)} answered at all</div></div>
+    <div class="tile"><div class="v">${w.newLeads}</div><div class="l">New people arrived</div></div>
+    <div class="tile"><div class="v">${Object.values(w.per).reduce((a,x)=>a+x.emails+x.wa,0)}</div><div class="l">Emails + WA sent</div><div class="s">${w.repliesIn} replies received from leads</div></div>
+    <div class="tile"><div class="v">${w.tickets}</div><div class="l">Support tickets opened</div></div>
+    <div class="tile"><div class="v">${w.won}</div><div class="l">Became clients</div></div>
+  </div>
+  ${names.length?`<details class="tbl" open><summary>Per person</summary><table>
+    <tr><th>Person</th><th>Attempts</th><th>Answered</th><th>Conversations 2m+</th><th>WhatsApp</th><th>Emails sent</th><th>Meetings</th><th>Notes</th></tr>
+    ${names.map(n=>{const p=w.per[n];return `<tr><td>${esc(n)}</td><td>${p.attempts}</td><td>${p.answered}</td><td><b>${p.conv}</b></td><td>${p.wa}</td><td>${p.emails}</td><td>${p.meetings}</td><td>${p.notes}</td></tr>`;}).join("")}
+  </table></details>`:""}`;
+}
+
 const PANELS = {
   today: {
-    title:"Today", filterable:true, count:()=>applyView(dueToday()).length+applyView(goneQuiet()).length+applyView(couponsExpiring()).length+applyView(cartLeads()).length,
+    /* one due definition (dueNow, same as Follow-ups) and one card per person:
+       whoever qualifies twice shows once, in the highest-priority section,
+       with the other reason on the chip. Weekly report lives in Reports now. */
+    title:"Today", filterable:true,
+    count(){
+      const seen=new Set(); const add=a=>a.filter(l=>!seen.has(l.id)&&(seen.add(l.id),true)).length;
+      return add(applyView(cartLeads()))+add(dueNow(applyView(followups())))+add(applyView(couponsExpiring()));
+    },
     render(){
-      const due=applyQ(dueToday()), quiet=applyQ(goneQuiet()), plan=applyQ(planned()), cexp=applyQ(couponsExpiring()), cart=applyQ(cartLeads());
+      const cartAll=applyQ(cartLeads()), dueAll=dueNow(applyQ(followups())), cexpAll=applyQ(couponsExpiring()), plan=applyQ(planned());
+      const reasons={};   // same order as the sections, so "also:" is always the OTHER reason
+      [[cartAll,"🛒 checkout"],[cexpAll,"🎟 coupon expiring"],[dueAll,"due follow-up"]]
+        .forEach(([a,tag])=>a.forEach(l=>{(reasons[l.id]=reasons[l.id]||[]).push(tag);}));
+      const also=l=>{ const r=reasons[l.id]||[]; return r.length>1?" · also: "+r.slice(1).join(", "):""; };
+      const seen=new Set(); const take=a=>a.filter(l=>!seen.has(l.id)&&(seen.add(l.id),true));
+      const cart=take(cartAll), cexp=take(cexpAll), due=take(dueAll);
       return `
       <div class="tiles">
         <div class="tile click" onclick="jump('sec-cart')"><div class="v">${cart.length}</div><div class="l">🛒 Started checkout</div><div class="s">pulled out the card, never paid</div></div>
-        <div class="tile click" onclick="jump('sec-due')"><div class="v">${due.length}</div><div class="l">Follow-ups due</div><div class="s">planned or ${CAD().resurface}+ days silent</div></div>
+        <div class="tile click" onclick="jump('sec-due')"><div class="v">${due.length}</div><div class="l">Follow-ups due</div><div class="s">same number as the Follow-ups tab</div></div>
         <div class="tile click" onclick="jump('sec-cexp')"><div class="v">${cexp.length}</div><div class="l">Coupons expiring ≤7d</div><div class="s">call before the code dies</div></div>
-        <div class="tile click" onclick="jump('sec-quiet')"><div class="v">${quiet.length}</div><div class="l">Gone quiet</div><div class="s">${CAD().quiet}+ days, still active</div></div>
         <div class="tile click" onclick="go('fresh')"><div class="v">${applyQ(newLeads()).length}</div><div class="l">Untouched leads</div><div class="s">zero activity so far</div></div>
       </div>
       <h2 id="sec-cart">🛒 Started checkout, never paid (${cart.length})</h2>
       <p class="hint">The hottest list there is: they were in the middle of buying and stopped. Disappears when they pay, or when marked Lost.</p>
       ${list(cart, l=> (l.lastPast&&daysAgo(l.lastPast)===0)
-        ? {txt:"✓ called today", dim:true}
-        : {txt:(l.created?(daysAgo(l.created)===0?"today":daysAgo(l.created)+"d ago"):""), cls:l.created&&daysAgo(l.created)<=7?"due":""})}
+        ? {txt:"✓ called today"+also(l), dim:true}
+        : {txt:(l.created?(daysAgo(l.created)===0?"today":daysAgo(l.created)+"d ago"):"")+also(l), cls:l.created&&daysAgo(l.created)<=7?"due":""})}
       <h2 id="sec-cexp">Coupons expiring soon (${cexp.length})</h2>
       ${list(cexp, l=> (l.lastPast&&daysAgo(l.lastPast)===0)
-        ? {txt:"✓ called today · "+expTxt(l.cp), dim:true}
-        : {txt:expTxt(l.cp), cls: daysTo(l.cp.exp)<=3?"due":"quiet"})}
+        ? {txt:"✓ called today · "+expTxt(l.cp)+also(l), dim:true}
+        : {txt:expTxt(l.cp)+also(l), cls: daysTo(l.cp.exp)<=3?"due":"quiet"})}
       <h2 id="sec-due">Due follow-ups (${due.length})</h2>
-      ${list(due, l=>l.planned?{txt:"due "+l.planned.toLocaleDateString(undefined,{day:"numeric",month:"short"}),cls:"due"}:{txt:l.quiet+"d silent",cls:"quiet"})}
-      <h2 id="sec-quiet">Gone quiet, ${CAD().quiet}+ days (${quiet.length})</h2>
-      ${list(quiet, l=>({txt:l.quiet+"d silent",cls:"quiet"}))}
+      ${list(due, l=>l.planned&&l.planned<=TODAY?{txt:"due "+l.planned.toLocaleDateString(undefined,{day:"numeric",month:"short"})+also(l),cls:"due"}:{txt:l.quiet+"d silent"+also(l),cls:"quiet"})}
       <h2>Scheduled ahead (${plan.length})</h2>
       ${list(plan, l=> (l.lastPast&&daysAgo(l.lastPast)===0)
         ? {txt:"✓ called today · due "+l.planned.toLocaleDateString(undefined,{day:"numeric",month:"short"}), dim:true}
-        : {txt:"due "+l.planned.toLocaleDateString(undefined,{day:"numeric",month:"short"})})}
-      <h2>The last seven days</h2>
-      ${(()=>{ const w=weekStats(); const names=Object.keys(w.per).sort();
-        return `<p class="hint">What was actually done since ${w.since.toLocaleDateString(undefined,{day:"numeric",month:"short"})}: real activity, not statuses. The funnel shows where leads stand; this shows what the team did.</p>
-        <div class="tiles">
-          <div class="tile"><div class="v">${Object.values(w.per).reduce((a,x)=>a+x.conv,0)}</div><div class="l">Real conversations</div><div class="s">2+ minutes, the number that matters</div></div>
-          <div class="tile"><div class="v">${Object.values(w.per).reduce((a,x)=>a+x.attempts,0)}</div><div class="l">Call attempts</div><div class="s">${Object.values(w.per).reduce((a,x)=>a+x.answered,0)} answered at all</div></div>
-          <div class="tile"><div class="v">${w.newLeads}</div><div class="l">New people arrived</div></div>
-          <div class="tile"><div class="v">${Object.values(w.per).reduce((a,x)=>a+x.emails+x.wa,0)}</div><div class="l">Emails + WA sent</div><div class="s">${w.repliesIn} replies received from leads</div></div>
-          <div class="tile"><div class="v">${w.tickets}</div><div class="l">Support tickets opened</div></div>
-          <div class="tile"><div class="v">${w.won}</div><div class="l">Became clients</div></div>
-        </div>
-        ${names.length?`<details class="tbl" open><summary>Per person</summary><table>
-          <tr><th>Person</th><th>Attempts</th><th>Answered</th><th>Conversations 2m+</th><th>WhatsApp</th><th>Emails sent</th><th>Meetings</th><th>Notes</th></tr>
-          ${names.map(n=>{const p=w.per[n];return `<tr><td>${esc(n)}</td><td>${p.attempts}</td><td>${p.answered}</td><td><b>${p.conv}</b></td><td>${p.wa}</td><td>${p.emails}</td><td>${p.meetings}</td><td>${p.notes}</td></tr>`;}).join("")}
-        </table></details>`:""}`; })()}`;
+        : {txt:"due "+l.planned.toLocaleDateString(undefined,{day:"numeric",month:"short"})})}`;
     }
   },
   fresh: {
@@ -1797,7 +2047,7 @@ const PANELS = {
       if(FILTER==="unassigned"){ arr=arr.filter(l=>!l.assigned); att=att.filter(l=>!l.assigned); }
       const fb=(id,lb)=>`<button class="fbtn ${FILTER===id?'active':''}" onclick="setFilter('${id}')">${lb}</button>`;
       return `<p class="hint">"Untouched" means zero logged activity, not just status "Neu". People you already tried (calls logged, no answer) are listed separately below and in Follow-ups. Save numbers to your phone before calling so WhatsApp shows a name.</p>
-      <div class="filters">${fb("all","All")}${fb("mine","👤 Mine")}${fb("unassigned","Unassigned")}${selBtn()}<button class="fbtn" onclick="window.__PF='lead';go('people')" title="The full registry: every lead ever, whatever the stage">📇 All leads →</button><button class="btn" onclick="vcfAll()">💾 Download all as contacts (.vcf)</button>${sortSel()}</div>
+      <div class="filters">${fb("all","All")}${fb("mine","👤 Mine")}${fb("unassigned","Unassigned")}${selBtn()}<button class="fbtn" onclick="allLeads()" title="The full registry: every lead ever, whatever the stage. Widens countries and dates so ALL really means all.">📇 All leads →</button><button class="btn" onclick="vcfAll()">💾 Download all as contacts (.vcf)</button>${sortSel()}</div>
       ${selBar([...arr,...att].map(l=>l.id))}
       <h2>Untouched (${arr.length})</h2>
       ${list(sortArr(arr), l=>({txt:daysAgo(l.created)===0?"today":daysAgo(l.created)+"d old"}))}
@@ -1810,7 +2060,7 @@ const PANELS = {
     }
   },
   followups: {
-    title:"Follow-ups", filterable:true, count:()=>fuDue(applyView(followups())).length,
+    title:"Follow-ups", filterable:true, count:()=>dueNow(applyView(followups())).length,
     render(){
       let arr=applyQ(followups());
       if(FILTER==="lt5") arr=arr.filter(l=>l.touches<5);
@@ -1819,7 +2069,7 @@ const PANELS = {
       if(FILTER==="mine") arr=arr.filter(l=>l.assigned===ME);
       if(FILTER==="unassigned") arr=arr.filter(l=>!l.assigned);
       const fb=(id,lb)=>`<button class="fbtn ${FILTER===id?'active':''}" onclick="setFilter('${id}')">${lb}</button>`;
-      const due=fuDue(arr), snoozed=arr.filter(fuSnoozed), sched=arr.filter(l=>!fuSnoozed(l)&&fuScheduled(l)),
+      const due=dueNow(arr), quiet=fuDue(arr).filter(fuQuiet), snoozed=arr.filter(fuSnoozed), sched=arr.filter(l=>!fuSnoozed(l)&&fuScheduled(l)),
             gaveup=arr.filter(l=>!fuSnoozed(l)&&!fuScheduled(l)&&fuGaveUp(l));
       const backIn=l=>{ const n=CAD().resurface-daysAgo(l.lastPast); return (l.quiet===0?"✓ touched today":"touched "+l.quiet+"d ago")+" · back in "+n+"d"; };
       return `<p class="hint">The work queue: everyone with any activity whose turn it is again. A call, WA or email today snoozes them; they come back automatically after ${CAD().resurface} days (change the rhythm in Settings → My cadence). Snoozed and scheduled people are in the folded lists below, nothing is lost. ✦ = touches this year, 🔥 = real conversation in the last 30 days, 💎 = was warm earlier, 👻 = many attempts, never answered.</p>
@@ -1827,6 +2077,8 @@ const PANELS = {
       ${selBar(due.map(l=>l.id))}
       <h2>Due now (${due.length})</h2>
       ${list(sortArr(due))}
+      <details class="tbl" ${quiet.length?"":"style='display:none'"}><summary>🌙 Gone quiet (${quiet.length}): worked at least once, then nothing for ${CAD().quiet}+ days, and still open (not Won, Lost or Junk)</summary>
+      ${quiet.sort((a,b)=>b.quiet-a.quiet).map(l=>leadRow(l,{txt:l.quiet+"d silent",cls:"quiet"})).join("")}</details>
       <details class="tbl" ${snoozed.length?"":"style='display:none'"}><summary>💤 Recently touched, snoozed (${snoozed.length}): resurface after ${CAD().resurface} days</summary>
       ${snoozed.sort((a,b)=>(b.lastPast||0)-(a.lastPast||0)).map(l=>leadRow(l,{txt:backIn(l)})).join("")}</details>
       <details class="tbl" ${sched.length?"":"style='display:none'"}><summary>📅 Scheduled ahead (${sched.length}): hidden until their date</summary>
@@ -1853,7 +2105,7 @@ const PANELS = {
     }
   },
   funnel: {
-    title:"Funnel", filterable:true, count:()=>applyView(LEADS.filter(l=>!l.internal && l.sf!=="stripe")).length,
+    title:"Reports", filterable:true, count:()=>applyView(LEADS.filter(l=>!l.internal && l.sf!=="stripe")).length,
     render(){
       // funnel = people who ARRIVED AS LEADS. Customers born from Stripe (no
       // lead journey, marker sf_status "stripe") are not funnel material and
@@ -1918,7 +2170,7 @@ const PANELS = {
       <p class="hint">Wrong number = status call_na and never a connected call (calling no longer applicable). Gave up = ${GIVEUP}+ call attempts, none connected (threshold: Settings → My cadence). Duplicates = merged cards + Salesforce-flagged. Anyone you later actually reach moves back to Real automatically.</p>
       ${bars(bs,["var(--serious)","var(--fgray)","var(--fgray)","var(--warn)"],received)}</details>
       <h2>Pipeline, real leads only (${realN})</h2>
-      <p class="hint">Counts follow the filter bar (countries + date range). Percentages are of REAL leads, so conversion is honest: dead numbers and junk no longer water it down. "Spoke" comes from the call log (connected call, meeting, WA call or a reply from them), not from the status. Nothing is changed in Salesforce.${stripeBorn?` Plus ${stripeBorn} existing customers who never came in as leads; they live in Clients, not in this funnel.`:""}</p>
+      <p class="hint">Counts follow the filter bar (countries + date range). Percentages are of REAL leads, so conversion is honest: dead numbers and junk no longer water it down. "Spoke" comes from the call log (connected call, meeting, WA call or a reply from them), not from the status. Nothing is changed in Salesforce.${stripeBorn?` Plus ${stripeBorn} existing customers who never came in as leads; they live in People and the Money list below, not in this funnel.`:""}</p>
       ${bars(stages,colors,realN||1)}
       <h2>Leads by source (all received)</h2>
       ${bars(src,["var(--f3)","var(--f3)","var(--f3)","var(--f3)","var(--f3)","var(--f3)"],received)}
@@ -1930,61 +2182,9 @@ const PANELS = {
       <tr><th>Stage (of real)</th><th>Leads</th></tr>
       ${stages.map(s=>`<tr><td>${s[0]}</td><td>${s[1]}</td></tr>`).join("")}
       <tr><th>Source</th><th>Leads</th></tr>
-      ${src.map(s=>`<tr><td>${esc(s[0])}</td><td>${s[1]}</td></tr>`).join("")}</table></details>`;
-    }
-  },
-  clients: {
-    title:"Clients", filterable:true, count:()=>(window.__clients||[]).length,
-    render(){
-      const q=(document.getElementById("q").value||"").toLowerCase().trim();
-      const set=activeCountries();
-      const rbC = rangeBounds();
-      const cs=(window.__clients||[]).filter(cl=>
-        (!q||[cl.name,cl.email].some(v=>(v||"").toLowerCase().includes(q)))
-        && set.has(ccOfClient(cl))
-        && (!rbC || (cl.first_paid_at && (!rbC.from || new Date(cl.first_paid_at)>=rbC.from)
-                                      && (!rbC.to || new Date(cl.first_paid_at)<=rbC.to))));
-      const soC=(window.__SORTX||{}).clients||"total";
-      cs.sort(soC==="mrr"?(a,b)=>(b.mrr||0)-(a.mrr||0)
-        :soC==="last"?(a,b)=>String(b.last_paid_at||"").localeCompare(String(a.last_paid_at||""))
-        :(a,b)=>(b.total_paid||0)-(a.total_paid||0));
-      const totalRev=cs.reduce((a,c)=>a+(c.total_paid||0),0);
-      const firsts=cs.map(c=>c.first_paid_at).filter(Boolean).map(d=>new Date(d));
-      const monthsActive=Math.max(1,firsts.length?Math.round((Date.now()-Math.min(...firsts))/2592000000):1);
-      const monthly=totalRev/monthsActive;
-      return `
-      <p class="hint">Everyone who actually paid, straight from Stripe. Country and date filters above apply (date = first payment, so ranges show new-client cohorts for reporting). Projection = monthly run-rate × 12 ("Subscriptions: Read" on the Stripe key would unlock true MRR). Clients are automatically counted as "Won" in the funnel and removed from all chase lists, so lead history stays accurate: a converted lead is still a lead in the year's numbers, just not a target anymore.</p>
-      <div class="tiles">
-        <div class="tile"><div class="v">${cs.length}</div><div class="l">Paying clients</div></div>
-        <div class="tile"><div class="v">${eur(totalRev)}</div><div class="l">Collected, all time</div></div>
-        <div class="tile"><div class="v">${eur(totalRev/Math.max(1,cs.length))}</div><div class="l">Avg per client</div></div>
-        <div class="tile"><div class="v">${eur(monthly)}</div><div class="l">Monthly run-rate</div></div>
-        <div class="tile"><div class="v">${eur(monthly*12)}</div><div class="l">Projected 12 months</div></div>
-      </div>
-      <div class="filters">${sortSelX("clients",[["total","Sort: total paid"],["mrr","Sort: MRR"],["last","Sort: last payment"]],"total")}</div>
-      ${cs.map(cl=>{
-        const lead = (cl.person_id&&byId[cl.person_id]) || null;
-        const last = cl.last_paid_at? daysAgo(new Date(String(cl.last_paid_at).slice(0,10)+"T00:00:00")) : null;
-        const pays = (cl.raw && cl.raw.pays) || [];
-        const isOpen = (window.__openC||new Set()).has(cl.stripe_id);
-        return `<div class="card ${isOpen?'open':''}"><div class="row" onclick="toggleC('${esc(cl.stripe_id)}')">
-          <div class="who"><span class="nm">💰 ${esc(cl.name||cl.email||cl.stripe_id)}</span>
-            <div class="co">${esc(cl.email||"")}</div></div>
-          <span class="chip" title="Successful Stripe payments only">${cl.payments}× paid ✓</span>
-          ${lead?`<span class="chip stage">${esc(lead.hub||lead.stage)}</span>`:""}
-          <a class="btn" href="https://dashboard.stripe.com/customers/${esc(cl.stripe_id)}" target="_blank" title="Open in Stripe" onclick="event.stopPropagation()">Stripe ↗</a>
-          ${cl.email?`<button class="btn" onclick="copyTxt('${esc(cl.email)}','email');event.stopPropagation()" title="Copy email">📋 ✉</button>`:""}
-          <span class="badge-t">${eur(cl.total_paid,cl.currency)}</span>
-          <span class="meta">${last===null?"":(last===0?"paid today":"paid "+last+"d ago")}</span>
-        </div>
-        <div class="detail" style="display:${isOpen?'flex':'none'};flex-direction:column">
-          <div class="notelog">${pays.length?pays.map(p2=>`<div class="noteitem">
-            <span class="meta">${new Date(p2.t*1000).toLocaleDateString()}</span> ${eur(p2.amt,cl.currency)}
-            ${p2.inv?` · invoice ${esc(String(p2.inv).slice(-10))}`:""}
-            · <a href="https://dashboard.stripe.com/payments/${esc(p2.id)}" target="_blank">receipt ↗</a></div>`).join("")
-            :'<div class="meta">Payment details appear after the next Stripe sync (runs within 30 min).</div>'}</div>
-        </div></div>`;
-      }).join("")||'<div class="empty">No paying clients found</div>'}`;
+      ${src.map(s=>`<tr><td>${esc(s[0])}</td><td>${s[1]}</td></tr>`).join("")}</table></details>
+      ${moneySection()}
+      ${weeklySection()}`;
     }
   },
   settings: {
@@ -1994,7 +2194,7 @@ const PANELS = {
         ["Salesforce", "salesforce", "read-only Hub Sync user, every 30 minutes, around the clock"],
         ["Coupons (admin panel)", "admin_panel", "pulls all discounts and creates the ones requested here"],
         ["Email", "email", "auto-sorting: support@ → tickets, team@/hello@ → leads, known senders → touches"],
-        ["Stripe", "stripe", "paying clients and revenue for the Clients tab"],
+        ["Stripe", "stripe", "paying clients and revenue for the Money report and person cards"],
         ["Placetel (calls)", "placetel", "calls auto-log through the Notify API; the CSV import stays as a cross-check"],
         ["Jira (read-only mirror)", "jira", "contracts, shipments and service tickets per location; the hub never writes to Jira"]
       ];
@@ -2103,6 +2303,10 @@ const PANELS = {
       const ts=(window.__tickets||[]);
       const q=(document.getElementById("q").value||"").toLowerCase().trim();
       const S=window.__SUP||(window.__SUP={lang:"all",days:"all",mine:false});
+      const ccT=t=>{ const p=t.person_id&&byId[t.person_id]; return p?p.cc:"?"; };
+      /* ONE country filter for the whole hub (the ⚙ Filters sheet); tickets
+         whose country is unknown always stay visible - hiding them would lie */
+      const gset=activeCountries();
       const f=t=>{
         if(t.junked) return false;
         if(q && ![t.customer_name,t.customer_email,t.subject].some(v=>(v||"").toLowerCase().includes(q))) return false;
@@ -2110,6 +2314,7 @@ const PANELS = {
         if(S.days!=="all" && daysAgo(new Date(String(t.opened_at).slice(0,10)+"T00:00:00"))>S.days) return false;
         if(S.mine && !(t.assignees||[]).includes(ME)) return false;
         if(S.un && (t.assignees||[]).length) return false;
+        const c=ccT(t); if(c!=="?" && !gset.has(c)) return false;
         return true;
       };
       const sf=(k,v,lb)=>`<button class="fbtn ${String(S[k])===String(v)?'active':''}" onclick="supF('${k}','${v}')">${lb}</button>`;
@@ -2125,7 +2330,7 @@ const PANELS = {
         const age=daysAgo(new Date(String(t.opened_at).slice(0,10)+"T00:00:00"));
         const stale=["new","waiting_us"].includes(t.state)&&last>=2;
         const lead=t.person_id&&byId[t.person_id];
-        const phone=lead&&lead.phone||"";
+        const phone=lead&&(lead.phone||(extraPhones(lead)[0]||{}).v)||"";
         const msgs=(window.__tmsgs||{})[t.id]||[];
         const isOpen=(window.__openT||new Set()).has(t.id);
         const thread=msgs.map(m=>`<div class="noteitem ${m.direction==="out"?"tout":""}">
@@ -2136,7 +2341,7 @@ const PANELS = {
             <div class="co">${esc(t.subject||"")}</div></div>
           <span class="chip" style="cursor:${window.CANW!==false?'pointer':'default'}" title="Detected from the first message body. Wrong? Click to flip DE/EN." onclick="${window.CANW!==false?`langFlip(${t.id});event.stopPropagation()`:''}">${t.language==="de"?"🇩🇪 DE":"🇬🇧 EN"}</span>
           ${msgs.length?`<span class="badge-t">${msgs.length}✉</span>`:""}
-          ${lead?`<span class="chip stage" title="Also a sales lead">lead ✦</span>`:""}
+          ${lead?`<span class="chip jump ${lifecycleOf(lead)==="client"?"life-client":"stage"}" onclick="openPerson('${lead.id}');event.stopPropagation()" title="Open their person card: full history, numbers, locations, payments">${lifecycleOf(lead)==="client"?"💰 client":"✦ lead"} →</span>`:""}
           ${lead&&locsFor(lead).some(j=>((window.__kidsByParent||{})[j.key]||[]).some(k=>k.project==="RK"&&kidOpen(k)))?`<span class="chip jump" onclick="go('ops');window.__OPS={kind:'service'};event.stopPropagation()" title="This customer also has an open service ticket in Jira">🔧 Jira service →</span>`:""}
           ${(t.assignees||[]).length?`<span class="chip asg" title="Assigned to ${esc((t.assignees||[]).join(", "))}">👤 ${(t.assignees||[]).map(a=>esc(String(a).split("@")[0])).join(" + ")}</span>`:""}
           ${window.CANW!==false?`<select class="st" onchange="assignT(${t.id},this.value);this.selectedIndex=0" onclick="event.stopPropagation()" title="Assign or unassign (picking an assigned person removes them)">
@@ -2200,7 +2405,11 @@ const PANELS = {
         :so==="old"?(a,b)=>b.age-a.age
         :(a,b)=>a.age-b.age);
       const q=(document.getElementById("q").value||"").toLowerCase().trim();
-      const shown=q?arr.filter(i=>(i.who+" "+i.title+" "+(i.key||"")+" "+(i.email||"")).toLowerCase().includes(q)):arr;
+      const qShown=q?arr.filter(i=>(i.who+" "+i.title+" "+(i.key||"")+" "+(i.email||"")).toLowerCase().includes(q)):arr;
+      /* same global country filter as everywhere; unknown-country items always show */
+      const ccI=i=>{ const p=(i.loc&&i.loc.person_id&&byId[i.loc.person_id])||(i.kid&&i.kid.person_id&&byId[i.kid.person_id]); return p?p.cc:"?"; };
+      const gset=activeCountries();
+      const shown=qShown.filter(i=>{ const c=ccI(i); return c==="?"||gset.has(c); });
       const hidden=shown.filter(i=>H.has(i.id));
       const live=shown.filter(i=>!H.has(i.id));
       const ours=live.filter(i=>i.our&&!i.quiet), theirs=live.filter(i=>!i.our&&!i.quiet), quiet=live.filter(i=>i.quiet);
@@ -2237,38 +2446,64 @@ const PANELS = {
     }
   },
   people: {
-    title:"People", count:()=>LEADS.length+((window.__extraPeople||[]).length),
+    /* All = the untouched full registry. The lead/client/support sub-views are
+       working views, so THERE the global filters (countries, dates, callable)
+       apply, money sorts only make sense for clients, and lead views get the
+       Mine/Unassigned owner filter. */
+    title:"People", filterable:true, count:()=>LEADS.length+((window.__extraPeople||[]).length),
     render(){
       const q=(document.getElementById("q").value||"").toLowerCase().trim();
       // colleagues are not leads: they only show when explicitly searched for
       let arr=LEADS.filter(l=>(!l.internal||q) && (!q||matchLead(l,q)));
       let extras=(window.__extraPeople||[]).filter(p=>!q||[p.name,p.email].some(v=>(v||"").toLowerCase().includes(q)));
       const F=window.__PF||"all";
+      const inView = F==="all" ? (x=>x) : applyView;   // "All" means ALL, filters kick in on the sub-views
       const counts={all:arr.length+extras.length,lead:0,client:0,support:0};
-      arr.forEach(l=>counts[lifecycleOf(l)]++);
+      inView(arr).forEach(l=>counts[lifecycleOf(l)]++);
       extras.forEach(p=>counts[p.pseudo==="client"?"client":"support"]++);
       if(F!=="all"){
-        arr=arr.filter(l=>lifecycleOf(l)===F);
+        arr=inView(arr).filter(l=>lifecycleOf(l)===F);
         extras=extras.filter(p=>(p.pseudo==="client"?"client":"support")===F);
       }
-      arr=[...arr].sort((a,b)=>(a.name||"").localeCompare(b.name||""));
-      extras=[...extras].sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+      const PO=window.__PFO||"all";   // owner filter, lead views only
+      if(F==="lead"&&PO==="mine") arr=arr.filter(l=>l.assigned===ME);
+      if(F==="lead"&&PO==="un") arr=arr.filter(l=>!l.assigned);
+      const PC=!!window.__PFC;        // clients with failing/retrying invoices only
+      if(F==="client"&&PC) arr=arr.filter(l=>ppOf(l).length);
       const fb=(id,lb)=>`<button class="fbtn ${F===id?'active':''}" onclick="setPF('${id}')">${lb}</button>`;
-      const prow=p=>`<div class="card"><div class="row" onclick="jumpSearch('${p.pseudo==="client"?"clients":"support"}','${esc(p.email||p.name)}')">
+      const fo=(id,lb)=>`<button class="fbtn ${PO===id?'active':''}" onclick="window.__PFO='${id}';render(false)">${lb}</button>`;
+      const prow=p=>`<div class="card"><div class="row" onclick="jumpSearch('${p.pseudo==="client"?"funnel":"support"}','${esc(p.email||p.name)}')">
         <div class="who"><span class="nm">${p.pseudo==="client"?"💰":"🎧"} ${esc(p.name)}</span><div class="co">${esc(p.email||"")}</div></div>
         <span class="chip ${p.pseudo==="client"?"life-client":""}">${p.pseudo==="client"?"client, Stripe only":"support-only"}</span>
         <span class="meta">${esc(p.sub||"")} →</span>
       </div></div>`;
-      const CAP=300;
-      const soP=(window.__SORTX||{}).people||"name";
-      const rows=[...arr.map(l=>({n:(l.name||"").toLowerCase(), act:l.lastPast?+l.lastPast:0, h:()=>leadRow(l,{txt:lifecycleOf(l)==="client"?"client":lifecycleOf(l)==="support"?"support-only":"lead"})})),
-                  ...extras.map(p=>({n:(p.name||"").toLowerCase(), act:0, h:()=>prow(p)}))]
-        .sort(soP==="active"?(a,b)=>(b.act-a.act)||a.n.localeCompare(b.n):(a,b)=>a.n.localeCompare(b.n));
-      return `<p class="hint">Everyone the hub knows, one entry per human, whatever the source: Salesforce, coupons, email, Stripe, support mail, manual. Slim cards mean the person exists only in Stripe or the support inbox so far; click them to jump to their data.</p>
-      <div class="filters">${fb("all","All · "+counts.all)}${fb("lead","✦ Leads · "+counts.lead)}${fb("client","💰 Clients · "+counts.client)}${fb("support","🎧 Support-only · "+counts.support)}${sortSelX("people",[["name","Sort: name"],["active","Sort: recently active"]],"name")}${selBtn()}</div>
+      let soP=(window.__SORTX||{}).people||"name";
+      const moneySorts=["total","mrr","last","issues"];
+      if(F!=="client"&&moneySorts.includes(soP)) soP="name";   // money sorts belong to the client view
+      const dir=(window.__SORTDIR||{}).people||"desc";
+      const money=x=>x.cl?x.cl.total_paid||0:0;
+      const cmp = soP==="active"?(a,b)=>(b.act-a.act)||a.n.localeCompare(b.n)
+          :soP==="total"?(a,b)=>(money(b)-money(a))||a.n.localeCompare(b.n)
+          :soP==="mrr"?(a,b)=>(((b.cl||{}).mrr||0)-((a.cl||{}).mrr||0))||a.n.localeCompare(b.n)
+          :soP==="last"?(a,b)=>String((b.cl||{}).last_paid_at||"").localeCompare(String((a.cl||{}).last_paid_at||""))||a.n.localeCompare(b.n)
+          :soP==="issues"?(a,b)=>(b.pp-a.pp)||(money(b)-money(a))||a.n.localeCompare(b.n)
+          :(a,b)=>a.n.localeCompare(b.n);
+      const money2=cl=>cl?eur(cl.total_paid,cl.currency)+" · "+(cl.last_paid_at?(daysAgo(new Date(String(cl.last_paid_at).slice(0,10)+"T00:00:00"))===0?"paid today":"paid "+daysAgo(new Date(String(cl.last_paid_at).slice(0,10)+"T00:00:00"))+"d ago"):""):"";
+      const rows=[...arr.map(l=>({n:(l.name||"").toLowerCase(), act:l.lastPast?+l.lastPast:0, cl:l.client, pp:F==="client"?ppOf(l).length:0,
+                    h:()=>leadRow(l,{txt:l.client?money2(l.client):(lifecycleOf(l)==="client"?"client":lifecycleOf(l)==="support"?"support-only":"lead")})})),
+                  ...extras.map(p=>({n:(p.name||"").toLowerCase(), act:0, cl:p.cl||null, pp:0, h:()=>prow(p)}))].sort(cmp);
+      if(dir==="asc") rows.reverse();
+      const CAP=(window.__pplCap||120);
+      return `<p class="hint">Everyone the hub knows, one entry per human, whatever the source: Salesforce, coupons, email, Stripe, support mail, manual. "All" ignores the filters on purpose; the Leads and Clients views follow them. Slim cards mean the person exists only in Stripe or the support inbox so far; click them to jump to their data.</p>
+      <div class="filters">${fb("all","All · "+counts.all)}${fb("lead","✦ Leads · "+counts.lead)}${fb("client","💰 Clients · "+counts.client)}${counts.support||F==="support"?fb("support","🎧 Support-only · "+counts.support):""}
+        ${F==="lead"?fo("all","Everyone")+fo("mine","👤 Mine")+fo("un","Unassigned"):""}
+        ${F==="client"?`<button class="fbtn ${PC?'active':''}" onclick="window.__PFC=!window.__PFC;render(false)" title="Only clients with a failing or retrying invoice right now">⚠ Payment issues</button>`:""}
+        ${sortSelX("people",[["name","Sort: name"],["active","Sort: recently active"],...(F==="client"?[["total","Sort: 💰 total paid"],["mrr","Sort: 💰 MRR"],["last","Sort: 💰 last payment"],["issues","Sort: ⚠ most payment issues"]]:[])],"name")}
+        <button class="fbtn" onclick="window.__SORTDIR=window.__SORTDIR||{};window.__SORTDIR.people=(window.__SORTDIR.people||'desc')==='desc'?'asc':'desc';render(false)" title="Flip the sort order">${dir==="desc"?"↓ high to low":"↑ low to high"}</button>
+        ${selBtn()}</div>
       ${selBar(arr.map(l=>l.id))}
       ${rows.slice(0,CAP).map(r=>r.h()).join("")||'<div class="empty">Nobody matches</div>'}
-      ${rows.length>CAP?`<p class="hint">Showing the first ${CAP} of ${rows.length}; use the search box to narrow down.</p>`:""}
+      ${rows.length>CAP?`<div class="acts" style="justify-content:center;margin:10px 0"><button class="btn" onclick="window.__pplCap=(window.__pplCap||120)+200;render(false)">↓ Load 200 more (${rows.length-CAP} left)</button></div>`:""}
       ${(window.__archived||[]).length?`<details class="tbl"><summary>🗃 Archived (${(window.__archived||[]).length}): put away, not deleted</summary>
         ${(window.__archived||[]).map(p=>`<div class="card"><div class="row" style="cursor:default">
           <div class="who"><span class="nm">${esc(p.name||p.email||"?")}</span><div class="co">${esc(p.company||p.email||"")}</div></div>
@@ -2341,7 +2576,7 @@ const PANELS = {
 window.setPF = f => { window.__PF=f; render(false); };
 
 /* ---------- users admin (settings, admins only) ---------- */
-const TABKEYS=["today","fresh","followups","coupons","funnel","clients","support","ops","people","trays"];
+const TABKEYS=["today","fresh","followups","coupons","funnel","support","ops","people","trays"];
 function usersAdmin(){
   const users=window.__users||[];
   const openU=window.__openU||(window.__openU=new Set());
@@ -2411,7 +2646,7 @@ function activityAdmin(){
   });
   const NAME={status:"status change", assign:"owner change", "mass-assign":"mass assignment", merge:"merge",
     unmerge:"merge undone", reminder:"reminder", delete:"deletion", archive:"archive", "ticket-state":"ticket state",
-    user:"user permissions", mailbox:"mailbox", cadence:"cadence", group:"company group", covered:"covered flag", referred:"referral link"};
+    user:"user permissions", mailbox:"mailbox", cadence:"cadence", group:"company group", covered:"covered flag", referred:"referral link", contact:"contact change"};
   const arow=a=>{
     const p=a.person_id&&byId[a.person_id];
     return `<div class="card"><div class="row" ${p?`onclick="openPerson('${p.id}')"`:'style="cursor:default"'}>
@@ -2545,16 +2780,21 @@ function render(){
   try{ document.getElementById("title").textContent=PANELS[CURRENT].title; }catch(e){}
   try{ if(ORG().brand) document.title=ORG().brand; }catch(e){}
   let html;
-  try{ html=(PANELS[CURRENT].filterable?viewbar():"")+PANELS[CURRENT].render(); }
+  try{ html=PANELS[CURRENT].render(); }
   catch(err){ html=errCard("Tab \""+CURRENT+"\"", err); }
   document.getElementById("content").innerHTML = html || errCard("Tab \""+CURRENT+"\"", "panel returned nothing");
   try{ applyFolds(); }catch(e){ console.error("folds failed:", e); }
   try{ if(document.getElementById("mcp-path")) mcpPath(); }catch(e){}
   try{
     const n=activeFilterCount();
-    document.getElementById("hctl").innerHTML = viewsSel() +
-      `<button class="fbtn ${n?'active':''}" onclick="showFilters()" title="See and change what is narrowing your view">👁 ${n?n+" filter"+(n>1?"s":""):"Filters"}</button>` +
-      (n?`<button class="fbtn active" onclick="resetFilters()" title="Reset all filters in one click">✕</button>`:"");
+    /* one toolbar: quick ranges as a segmented pill (filterable tabs only), then
+       ONE Filters button carrying the only count, then views. Nothing stacked. */
+    const seg = PANELS[CURRENT].filterable ? `<div class="seg">`+
+      [["all","All 2026"],[90,"90d"],[30,"30d"],[7,"7d"]].map(([v,lb])=>
+        `<button class="${String(VIEW.range)===String(v)?'on':''}" onclick="setRange('${v}')">${lb}</button>`).join("")+`</div>` : "";
+    document.getElementById("hctl").innerHTML = seg +
+      `<button class="fbt" onclick="showFilters()" title="See and change everything narrowing your view: countries, callable, dates, tab filters, search">${ICN.sliders} Filters${n?` <span class="n">${n}</span>`:""}</button>` +
+      viewsSel();
     const qc=document.getElementById("qclear");
     if(qc) qc.style.display=(document.getElementById("q").value||"")?"block":"none";
     const pb=document.getElementById("plusbtn");
@@ -2804,7 +3044,11 @@ window.remDel = async i => {
   window.__rems=(window.__rems||[]).filter(x=>x.id!==r.id);
   toast("Deleted"); render(false); remList();
 };
-window.go=k=>{CURRENT=k;FILTER="all";if(k!=="settings")window.__lastTab=k;render();window.scrollTo(0,0);};
+window.go=k=>{if(!PANELS[k])k=k==="clients"?"funnel":"today";CURRENT=k;FILTER="all";if(k!=="settings")window.__lastTab=k;render();window.scrollTo(0,0);};
+/* "All leads" means ALL: widen the global filters, then open the registry.
+   The ⚙ Filters button still shows anything left narrowing the view. */
+window.allLeads=()=>{ VIEW.preset="all"; VIEW.extra=null; VIEW.range="all"; VIEW.callable=false; saveView();
+  window.__PF="lead"; window.__PFO="all"; window.__PFC=false; go('people'); toast("Every lead: countries and dates widened"); };
 window.jump=id=>{const el=document.getElementById(id); if(el) el.scrollIntoView({behavior:"smooth"});};
 window.goFiltered=(k,f)=>{CURRENT=k;FILTER=f;render();window.scrollTo(0,0);};
 
@@ -2869,7 +3113,7 @@ function renderQDrop(){
       if(cl.person_id && byId[cl.person_id]) continue;
       if([cl.name,cl.email].some(v=>(v||"").toLowerCase().includes(q)))
         hits.push({tag:"client", h:`<b>${esc(cl.name||cl.email)}</b> <span class="meta">${esc(eur(cl.total_paid,cl.currency))}</span>`,
-          act:"jumpSearch('clients','"+esc((cl.email||cl.name||"").replace(/'/g,""))+"')"});
+          act:"jumpSearch('funnel','"+esc((cl.email||cl.name||"").replace(/'/g,""))+"')"});
     }
   }catch(e){ console.error("search failed:",e); }
   box.innerHTML=hits.map(x=>`<div class="qhit" onclick="${x.act};qClose()"><span class="tag">${x.tag}</span><div style="flex:1">${x.h}</div></div>`).join("")
@@ -2882,6 +3126,7 @@ window.openPerson=id=>{
   CURRENT="people"; FILTER="all"; window.__PF="all";
   document.getElementById("q").value=l.email||l.phone||l.name||"";
   render(); window.scrollTo(0,0);
+  (window.__openLd||(window.__openLd=new Set())).add(id);
   const card=document.querySelector(`.card[data-id="${id}"]`);
   if(card){ card.classList.add("open"); card.scrollIntoView({behavior:"smooth",block:"center"}); }
 };
@@ -3270,7 +3515,7 @@ function activeFilterCount(){
 }
 window.resetFilters = () => {
   VIEW = {preset:"my", extra:null, callable:false, range:"all", showCC:VIEW.showCC}; saveView();
-  FILTER="all"; window.__SUP={lang:"all",days:"all",mine:false,un:false}; window.__PF="all"; window.SORT="recent";
+  FILTER="all"; window.__SUP={lang:"all",days:"all",mine:false,un:false}; window.__PF="all"; window.__PFO="all"; window.__PFC=false; window.SORT="recent";
   window.__curView=null;
   const q=document.getElementById("q"); if(q) q.value="";
   toast("All filters reset"); render(false);
@@ -3351,25 +3596,28 @@ window.showFilters = () => {
       ${x.f.scope==="tab"&&x.f.tab&&x.f.tab!==CURRENT?`<button class="btn" onclick="document.getElementById('mergeov').remove();go('${x.f.tab}')" title="This filter lives on another tab">→ ${esc((PANELS[x.f.tab]||{}).title||x.f.tab)}</button>`:""}
       <button class="btn" onclick="clearOneFilter(${x.i})" title="Remove only this filter">✕</button></div>`;
   const ov=document.createElement("div"); ov.id="mergeov";
-  ov.innerHTML=`<div class="mcard" style="width:560px"><h3>Your filters</h3>
-    <div class="meta"><b>Everywhere:</b> countries and date range narrow every tab. Change them right here.</div>
-    <div class="filters" style="margin:0">
+  ov.innerHTML=`<div class="mcard" style="width:560px"><h3>Filters</h3>
+    ${lines.length?`<div class="fsec">Active now</div>${lines.map(line).join("")}`:""}
+    <div class="fsec">Countries · counts follow this tab</div>
+    <div class="filters" style="margin:0 0 6px">
       <button class="fbtn" onclick="dlgCCMine()">🏠 My territory</button>
       <button class="fbtn" onclick="dlgCCAll()">✓ All countries</button>
       <button class="fbtn" onclick="dlgCCNone()">✗ None</button>
-      <button class="fbtn ${VIEW.callable?'active':''}" onclick="dlgCallable()">☎ Callable now: ${VIEW.callable?"on":"off"}</button>
     </div>
     <div class="filters" style="margin:0;max-height:150px;overflow-y:auto">${ccChips}</div>
+    <div class="fsec">Callable</div>
+    <label class="chip" style="cursor:pointer;display:inline-flex;gap:6px;align-items:center">
+      <input type="checkbox" ${VIEW.callable?"checked":""} onchange="dlgCallable()"> ☎ Only people awake right now (${CAD().callFrom}:00–${CAD().callTo}:00 their local time)</label>
+    <div class="fsec">Date range</div>
     <div class="filters" style="margin:0">
       ${rb("all","All 2026")}${rb(90,"90d")}${rb(30,"30d")}${rb(7,"7d")}
       <input type="date" class="li" id="dlg-dfrom" style="padding:4px 8px;font-size:12px" value="${(VIEW.range&&VIEW.range.f)||""}" title="From date">
       <input type="date" class="li" id="dlg-dto" style="padding:4px 8px;font-size:12px" value="${(VIEW.range&&VIEW.range.t)||""}" title="To date">
       <button class="fbtn" onclick="dlgRangeApply()">→ Apply dates</button>
     </div>
-    ${lines.length?`<div class="meta" style="margin-top:6px"><b>Also narrowing your view:</b></div>${lines.map(line).join("")}`:'<div class="meta" style="margin-top:6px">No other filters active.</div>'}
-    <div class="acts" style="justify-content:flex-end;margin-top:8px">
-      <button class="btn" onclick="document.getElementById('mergeov').remove()">Done</button>
-      <button class="btn primary" onclick="document.getElementById('mergeov').remove();resetFilters()">✕ Reset all</button>
+    <div class="acts" style="justify-content:space-between;margin-top:14px">
+      <button class="btn" onclick="document.getElementById('mergeov').remove();resetFilters()" title="Back to your territory defaults, everything else off">Reset all</button>
+      <button class="btn primary" onclick="document.getElementById('mergeov').remove()">Done</button>
     </div></div>`;
   ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
   document.body.appendChild(ov);
