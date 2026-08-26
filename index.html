@@ -265,6 +265,22 @@ const day = s => { if(!s) return null; const d=new Date(String(s).slice(0,10)+"T
 const daysAgo = d => Math.round((TODAY - d)/86400000);
 const esc = s => (s||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const digits = s => (s||"").replace(/\D/g,"");
+/* generic mail providers: an address there says nothing about the company */
+const FREE_MAIL=new Set(["gmail.com","yahoo.com","hotmail.com","outlook.com","web.de","gmx.de","gmx.net","gmx.at",
+  "t-online.de","aol.com","icloud.com","me.com","live.com","live.de","yahoo.de","hotmail.de","outlook.de",
+  "googlemail.com","protonmail.com","proton.me","mail.com","msn.com","yandex.com","freenet.de","arcor.de","mail.ru","ymail.com"]);
+const mailDom=e=>{const m=(e||"").toLowerCase().match(/@(.+)$/);return m?m[1]:null;};
+/* a lead whose company email domain belongs to a paying client: probably an
+   existing account (new location, or a colleague writing in). Badge only,
+   never suppressed from any queue. */
+function domClient(l){
+  if(l.internal||isClientL(l)) return null;
+  for(const e of [l.email,l.alt]){
+    const d=mailDom(e), hit=d&&(window.__clientDomains||{})[d];
+    if(hit&&hit.id!==l.id) return hit;
+  }
+  return null;
+}
 /* search matches phones in ANY written form: +1-23, 00123, (123), spaces, dots */
 function phoneHit(q, ...phones){
   const qd = digits(q);
@@ -272,8 +288,19 @@ function phoneHit(q, ...phones){
   const qq = qd.replace(/^0+/,"");
   return !!qq && phones.some(p=>digits(p).includes(qq));
 }
+/* beyond the person's own fields: extra contacts, every Stripe client email,
+   Jira issue keys (CS/SH/RK) and the emails/phones that exist only on Jira
+   tickets. Typing a number that lives nowhere but Jira still finds the client. */
+function xtraHit(l,q){
+  const x=(window.__jsearch||{})[l.id]; if(!x) return false;
+  if(x.includes(q)) return true;
+  const qd=digits(q).replace(/^0+/,"");
+  return qd.length>=4 && !/[a-z]/.test(q) &&
+    x.split(" ").some(w=>w.startsWith("p:")&&w.slice(2).includes(qd));
+}
 const matchLead = (l,q) => phoneHit(q, l.phone, l.altPhone) ||
-  [l.name,l.co,l.email,l.phone,l.alt].some(v=>(v||"").toLowerCase().includes(q));
+  [l.name,l.co,l.email,l.phone,l.alt].some(v=>(v||"").toLowerCase().includes(q)) ||
+  xtraHit(l,q);
 
 /* ---------- stage mapping ---------- */
 const STAGE = {"Neu":"New","Open - Not Contacted":"New","contacted":"Contacted","call_na":"Contacted",
@@ -465,6 +492,13 @@ function derive(l){
   l.touches = (l.sfTouches||0) + l.logs.length;
   l.isNew = l.stage==="New";
   l.attempted = l.isNew && l.touches>0;
+  // an inbound email, a connected call, a held meeting or a WA call means they
+  // DID answer: the chip must never claim "No answer yet" then (Steve Pomery bug)
+  l.replied = l.logs.some(g=>
+    (g.kind==="call" && (!g.detail || !/not reached/i.test(g.detail))) ||
+    (g.kind==="meeting" && !/CANCELED/.test(g.detail||"") && day(String(g.at).slice(0,10))<=TODAY) ||
+    (g.kind==="email" && !g.by_user) ||
+    (g.kind==="wa" && /WA call/i.test(g.detail||"")));
   l.quiet = l.lastPast ? daysAgo(l.lastPast) : (l.created ? daysAgo(l.created) : 0);
 }
 /* Supabase caps every response at 1000 rows; growing tables MUST be paged or
@@ -517,7 +551,7 @@ async function loadData(delta){
     sb.from("unmatched_inbox").select("*").order("last_at",{ascending:false}).limit(500),
     sb.from("unmatched_calls").select("*").order("cnt",{ascending:false}).limit(500),
     sb.from("coupon_requests").select("*").order("id",{ascending:false}).limit(50),
-    sb.from("mailboxes").select("email,owner_email,host,port,active,ok,error,last_sync").order("email"),
+    sb.from("mailboxes").select("email,owner_email,host,port,active,ok,error,last_sync,fail_count,broken,shared").order("email"),
     sb.from("audit").select("*").order("at",{ascending:false}).limit(400),
     // Jira mirror: locations always (slim, ~360 rows), children only the OPEN
     // ones (closed history loads lazily per person), comments newest first
@@ -667,6 +701,7 @@ async function loadData(delta){
       gid: p.group_id||null,
       covered: !!p.covered_at,
       refBy: p.referred_by||null,
+      sfe: (p.sf_enrich&&p.sf_enrich.cls&&p.sf_enrich.cls!=="none")?p.sf_enrich:null,
       internal: isInternal(p.email)
     };
     derive(l);
@@ -685,18 +720,52 @@ async function loadData(delta){
   });
   LEADS.forEach(l=>{ l.cp = l.coupons.filter(x=>x.active).sort((a,b)=>a.exp-b.exp)[0] || null; });
   const cByEmail = {}; (clientRows||[]).forEach(cl=>{ if(cl.email) cByEmail[cl.email]=cl; });
-  LEADS.forEach(l=>{ l.client=null; });
-  (clientRows||[]).forEach(cl=>{ if(cl.person_id && byId[cl.person_id]) byId[cl.person_id].client=cl; });
+  // one human can own several Stripe customer rows (the real paying account
+  // plus an abandoned-checkout shell: Vilhelm, Terrance). The person carries
+  // ALL of them; l.client is the combined picture, the paying row wins the
+  // Stripe deep link, and nothing shows 0 € because a shell arrived last.
+  LEADS.forEach(l=>{ l.client=null; l.clients=[]; });
+  (clientRows||[]).forEach(cl=>{ if(cl.person_id && byId[cl.person_id]) byId[cl.person_id].clients.push(cl); });
+  LEADS.forEach(l=>{
+    if(!l.clients.length && l.email && cByEmail[l.email.toLowerCase()]) l.clients.push(cByEmail[l.email.toLowerCase()]);
+    if(!l.clients.length && l.alt && cByEmail[l.alt.toLowerCase()]) l.clients.push(cByEmail[l.alt.toLowerCase()]);
+    l.client = mergeClientRows(l.clients);
+  });
   // country was unknown from the phone? Stripe's invoice address settles it
   LEADS.forEach(l=>{ if((!l.cc||l.cc==="?") && l.client && l.client.country) l.cc = l.client.country==="GB"?"UK":l.client.country; });
-  LEADS.forEach(l=>{
-    if(!l.client && l.email && cByEmail[l.email.toLowerCase()]) l.client=cByEmail[l.email.toLowerCase()];
-    if(!l.client && l.alt && cByEmail[l.alt.toLowerCase()]) l.client=cByEmail[l.alt.toLowerCase()];
-  });
   LEADS.forEach(l=>{ if(l.client) derive(l); });   // clients become "Won" after linking
   // country rescue: no readable phone and no useful email ending, but Stripe
   // knows the card country of their client record
   LEADS.forEach(l=>{ if(l.cc==="?" && l.client && l.client.country) l.cc = l.client.country==="GB"?"UK":l.client.country; });
+  // searchable side-identity, built once per load: Jira keys, Jira contact
+  // emails/phones, extra contacts, every Stripe client email. Phones are
+  // stored digit-only with a p: prefix so phoneHit-style matching works.
+  window.__jsearch={};
+  LEADS.forEach(l=>{
+    const parts=[];
+    const kid=k=>{ parts.push(k.key, k.contact_email, k.contact_name); if(k.phone) parts.push("p:"+digits(k.phone)); };
+    locsFor(l).forEach(j=>{
+      parts.push(j.key, j.client_number, j.company, j.contact_name, j.contact_email, j.manager_email);
+      if(j.phone) parts.push("p:"+digits(j.phone));
+      (((window.__kidsByParent||{})[j.key])||[]).forEach(kid);
+    });
+    orphanKidsFor(l).forEach(kid);
+    (l.contacts||[]).forEach(c=>{ if(c.t==="phone") parts.push("p:"+digits(c.v)); else parts.push(c.v); });
+    clientRowsOf(l).forEach(cl=>parts.push(cl.email, cl.stripe_id));
+    const s=parts.filter(Boolean).map(v=>String(v).toLowerCase()).join(" ");
+    if(s) window.__jsearch[l.id]=s;
+  });
+  // company domains that already pay, for the "client domain" badge on leads
+  window.__clientDomains={};
+  const ownDom=(ORG().mailDomain||"").toLowerCase();
+  LEADS.forEach(l=>{
+    if(l.internal||!isClientL(l)) return;
+    [l.email,l.alt,...clientRowsOf(l).map(c=>c.email)].forEach(e=>{
+      const d=mailDom(e);
+      if(d&&!FREE_MAIL.has(d)&&d!==ownDom&&!window.__clientDomains[d])
+        window.__clientDomains[d]={id:l.id, name:l.name||l.co||d};
+    });
+  });
   // company groups: several PEOPLE under one company (never merged)
   window.__groupMembers={};
   LEADS.forEach(l=>{ if(l.gid) (window.__groupMembers[l.gid]=window.__groupMembers[l.gid]||[]).push(l.id); });
@@ -774,13 +843,16 @@ function leadRow(l, extra){
     // inside People's Clients view every row is a client: saying so is noise
     (l.client&&!(CURRENT==="people"&&(window.__PF||"all")==="client"))?`<span class="chip coupon" title="Paying client · ${esc(eur(l.client.total_paid,l.client.currency))}">💰 client</span>`:"",
     l.covered?'<span class="chip" title="Their company already pays; this lead sits out of the chase lists (change it in the 🏢 group on their card)">💰 covered</span>':"",
+    (dc=>dc?`<span class="chip jump" onclick="openPerson('${dc.id}');event.stopPropagation()" title="Their email domain belongs to a paying client (${esc(dc.name)}): likely an existing account, a new location or a colleague. Info only, nothing is hidden. Click to open the client.">🏢 client domain</span>`:"")(typeof domClient==="function"?domClient(l):null),
     l.cp?`<span class="chip coupon ${l.cp.offer?"jump":""}" title="${esc(l.cp.code)}${l.cp.offer?" · click to copy the offer link":""}" ${l.cp.offer?`onclick="copyTxt('${esc(l.cp.offer)}','offer link');event.stopPropagation()"`:""}>🎟 ${esc(l.cp.val)}${l.cp.offer?" 🔗":""}</span>`
-      :(l.coupon?'<span class="chip coupon">Coupon</span>':(/Book a Call/i.test(l.src)?'<span class="chip call">Book-a-call</span>':"")),
+      // the bare "Coupon" source flag is lead-chasing info: on a client with no
+      // active coupon it is just noise, so it stays hidden there
+      :(l.coupon&&!isClientL(l)?'<span class="chip coupon">Coupon</span>':(/Book a Call/i.test(l.src)?'<span class="chip call">Book-a-call</span>':"")),
     locsFor(l).length?`<span class="chip" title="Locations in Jira: contract, shipments, service">📍 ${locsFor(l).length}</span>`:"",
     l.assigned?`<span class="chip asg" title="Lead owner: ${esc(l.assigned)}">👤 ${esc(String(l.assigned).split("@")[0])}</span>`
       :(window.CANW!==false&&terrOwner(l.cc)?`<span class="chip jump" onclick="assignLead('${l.id}','${esc(terrOwner(l.cc))}');event.stopPropagation()" title="${esc(l.cc)} is in this person's territory. One click assigns; nothing happens by itself.">👤 suggest: ${esc(String(terrOwner(l.cc)).split("@")[0])}</span>`:""),
     // a client's stage is "Won" by definition: saying it again is noise. Lost or anything odd still shows.
-    (isClientL(l)&&(l.hub||l.stage)==="Won")?"":`<span class="chip stage">${esc(l.hub||(l.attempted?"No answer yet":l.stage))}</span>`
+    (isClientL(l)&&(l.hub||l.stage)==="Won")?"":`<span class="chip stage">${esc(l.hub||(l.attempted?(l.replied?"Replied":"No answer yet"):l.stage))}</span>`
   ].join("");
   const rowPhone=l.phone||(extraPhones(l)[0]||{}).v||"";
   return `<div class="card ${(window.__openLd||new Set()).has(l.id)?'open':''}" data-id="${l.id}"${extra&&extra.dim?' style="opacity:.55"':''}>
@@ -840,7 +912,7 @@ function leadRow(l, extra){
           <button class="btn" onclick="addNote('${l.id}')">Add</button>
         </div>`:""}
         <div class="meta">Source: ${esc(l.src||"?")}${l.created?` · Created ${l.created.toLocaleDateString()}`:""} · ${esc(l.phone||"no phone")}${l.alt?` · also: ${esc(l.alt)}`:""}
-          ${l.sfId&&ORG().salesforceUrl?` · <a class="sflink" href="${esc(ORG().salesforceUrl)}/lightning/r/Lead/${l.sfId}/view" target="_blank" onclick="event.stopPropagation()">Salesforce ↗</a>`:""}${l.client&&l.client.stripe_id?` · <a class="sflink" href="https://dashboard.stripe.com/customers/${esc(l.client.stripe_id)}" target="_blank" onclick="event.stopPropagation()">Stripe ↗</a>`:""}</div>
+          ${l.sfId&&ORG().salesforceUrl?` · <a class="sflink" href="${esc(ORG().salesforceUrl)}/lightning/r/Lead/${l.sfId}/view" target="_blank" onclick="event.stopPropagation()">Salesforce ↗</a>`:""}${l.client&&l.client.stripe_id?` · <a class="sflink" href="https://dashboard.stripe.com/customers/${esc(l.client.stripe_id)}" target="_blank" onclick="event.stopPropagation()">Stripe ↗</a>`:""}${sfeLine(l)}</div>
       </div>
     </div>
   </div>`;
@@ -862,17 +934,37 @@ const ticketsOf = l => {
     (t.customer_email && (t.customer_email===em || (alt && t.customer_email===alt))));
 };
 /* ---------- Jira mirror: locations, shipments, service tickets ---------- */
-/* locations of a person: linked directly, or through their Stripe client */
+/* every Stripe customer row of a person (the merged l.client remembers them) */
+const clientRowsOf = l => (l.clients&&l.clients.length?l.clients:(l.client?[l.client]:[]));
+/* several Stripe rows, one person: totals add up, dates span all rows, the row
+   with real payments provides identity (stripe_id, email, currency) so the
+   deep link never lands on an empty checkout shell */
+function mergeClientRows(rows){
+  if(!rows||!rows.length) return null;
+  if(rows.length===1) return rows[0];
+  const best=rows.slice().sort((a,b)=>(b.total_paid||0)-(a.total_paid||0)||(b.payments||0)-(a.payments||0))[0];
+  const agg=Object.assign({},best);
+  agg.total_paid=rows.reduce((a,r)=>a+(r.total_paid||0),0);
+  agg.payments=rows.reduce((a,r)=>a+(r.payments||0),0);
+  agg.mrr=rows.reduce((a,r)=>a+(r.mrr||0),0);
+  agg.first_paid_at=rows.map(r=>r.first_paid_at).filter(Boolean).sort()[0]||null;
+  agg.last_paid_at=rows.map(r=>r.last_paid_at).filter(Boolean).sort().slice(-1)[0]||null;
+  if(!agg.country) agg.country=rows.map(r=>r.country).filter(Boolean)[0]||null;
+  const pays=rows.flatMap(r=>(r.raw&&Array.isArray(r.raw.pays))?r.raw.pays:[]);
+  agg.raw=Object.assign({},best.raw,{pays:pays.sort((a,b)=>(a.t||0)-(b.t||0))});
+  return agg;
+}
+/* locations of a person: linked directly, or through any of their Stripe clients */
 function locsFor(l){
   const direct=(window.__locByPerson||{})[l.id]||[];
-  const viaClient=l.client?((window.__locByClient||{})[l.client.id]||[]):[];
+  const viaClient=clientRowsOf(l).flatMap(cl=>((window.__locByClient||{})[cl.id])||[]);
   const seen=new Set(direct.map(x=>x.key));
-  return [...direct, ...viaClient.filter(x=>!seen.has(x.key))];
+  return [...direct, ...viaClient.filter(x=>{ if(seen.has(x.key)) return false; seen.add(x.key); return true; })];
 }
 /* shipments/service with NO location ticket anywhere in Jira: matched straight
    to the person (server match by id, plus email/phone here for fresh rows) */
 function orphanKidsFor(l){
-  const ems=[l.email,l.alt,l.client&&l.client.email].filter(Boolean).map(e=>e.toLowerCase());
+  const ems=[l.email,l.alt,...clientRowsOf(l).map(cl=>cl.email)].filter(Boolean).map(e=>e.toLowerCase());
   const ph9=[l.phone,l.altPhone].filter(Boolean).map(p=>digits(p).slice(-9)).filter(d=>d.length===9);
   return (RAW.jkids||[]).filter(k=>{
     if(k.parent_key) return false;
@@ -884,7 +976,7 @@ function orphanKidsFor(l){
 }
 /* payment problems of a person, matched over every email we know for them */
 function ppOf(l){
-  const ems=[l.email,l.alt,l.client&&l.client.email].filter(Boolean).map(e=>e.toLowerCase());
+  const ems=[l.email,l.alt,...clientRowsOf(l).map(cl=>cl.email)].filter(Boolean).map(e=>e.toLowerCase());
   return (window.__pprobs||[]).filter(p=>p.email&&ems.includes(p.email));
 }
 const jiraLink = key => ORG().jiraUrl ? `<a class="sflink" href="${esc(ORG().jiraUrl)}/browse/${esc(key)}" target="_blank" onclick="event.stopPropagation()">${esc(key)} ↗</a>` : esc(key);
@@ -945,7 +1037,10 @@ function locBlock(l){
       j.watches?j.watches+" watches":null].filter(Boolean).join(" · ");
     const prices=[["start",j.price_start],["now",j.price_now],["3m",j.price_3m],["6m",j.price_6m],["12m",j.price_12m]]
       .filter(x=>x[1]!=null).map(x=>x[0]+" "+x[1]+"€").join(" · ");
-    const dates=[j.test_start?"test "+dstr(j.test_start)+" → "+(dstr(j.test_end)||"?"):null,
+    // the test period matters while it runs (or is coming); on a customer who
+    // signed long ago the old dates were showing up as a confusing bare "test"
+    const testLive=/TEST/i.test(j.phase||"") || (j.test_end && day(j.test_end)>=TODAY);
+    const dates=[testLive&&j.test_start?"test period "+dstr(j.test_start)+" → "+(dstr(j.test_end)||"?"):null,
       j.contract_renewal?"renewal "+dstr(j.contract_renewal):null,
       j.contract_termination?"terminated "+dstr(j.contract_termination):null].filter(Boolean).join(" · ");
     return `<details class="tbl" ${(window.__openLoc||new Set()).has(j.key)?"open":""} ontoggle="locTog('${j.key}',this.open)">
@@ -1280,13 +1375,26 @@ function lifecycleOf(l){
   if(!leadish && ticketsOf(l).length) return "support";
   return "lead";
 }
+/* Salesforce history found by the weekly enrichment: pure information, the
+   person's funnel behaviour never changes because of it */
+function sfeLine(l){
+  const e=l.sfe; if(!e) return "";
+  const d=s=>s?String(s).slice(0,10):null;
+  const link=e.lead_id&&ORG().salesforceUrl?` <a class="sflink" href="${esc(ORG().salesforceUrl)}/lightning/r/Lead/${esc(e.lead_id)}/view" target="_blank" onclick="event.stopPropagation()">SF ↗</a>`:"";
+  const txt=e.cls==="migrated"?`SF: customer since ${d(e.sf_created)||"before 2026"} (migrated to Stripe)`
+    :e.cls==="converted-lead"?`SF: was a lead${e.source?" ("+esc(e.source)+")":""}${d(e.sf_created)?" since "+d(e.sf_created):""}${d(e.converted_at)?", converted "+d(e.converted_at):""}`
+    :e.cls==="customer-2026"?`SF: customer record from ${d(e.sf_created)||"2026"}`
+    :`SF: still an open lead (${esc(e.status||"?")})${e.stale?" although they pay - SF is stale":""}`;
+  return ` · <span class="meta" title="Found in Salesforce by ${esc(e.matched_by||"match")} with no date limit. Information only: funnel numbers ignore it.">${txt}</span>${link}`;
+}
 /* person header: who they are + shortcuts to everything linked to them */
 function phead(l){
   const tks=ticketsOf(l), openT=tks.filter(t=>t.state!=="resolved").length;
   const actC=l.coupons.filter(c=>c.active).length;
   const life=lifecycleOf(l);
-  const lchip = life==="client"?`<span class="chip life-client" title="${l.client?"Paying client in Stripe":"Customer in Jira (contract, shipments or service); no Stripe payments on file - likely pays by bank transfer"}">💰 client</span>`
-    : life==="support"?'<span class="chip">🎧 support-only</span>':'<span class="chip life-lead">✦ lead</span>';
+  const lchip = (life==="client"?`<span class="chip life-client" title="${l.client?"Paying client in Stripe":"Customer in Jira (contract, shipments or service); no Stripe payments on file - likely pays by bank transfer"}">💰 client</span>`
+    : life==="support"?'<span class="chip">🎧 support-only</span>':'<span class="chip life-lead">✦ lead</span>')
+    + (dc=>dc?` <span class="chip jump" onclick="openPerson('${dc.id}')" title="Their email domain belongs to the paying client ${esc(dc.name)}: likely an existing account, a new location or a colleague. Info only. Click to open the client.">🏢 client domain →</span>`:"")(typeof domClient==="function"?domClient(l):null);
   /* contacts first (the phone is ringing, grab email + number), then status,
      then shortcuts. Anything with a zero count stays invisible. */
   return `<div class="phead" onclick="event.stopPropagation()">
@@ -1611,28 +1719,43 @@ window.trayDismiss = async (type,key,val) => {
 window.doMerge = async (keepId, dupId) => {
   const keep=byId[keepId], dup=byId[dupId];
   if(!await hubConfirm("⇄ Merge "+esc(dup.name||"?")+" into "+esc(keep.name||"?")+"?",
-    "One person, one card: all notes, touches, coupons and tickets move over, and BOTH emails and BOTH phone numbers are kept. The payment email becomes the primary one.","Merge")) return;
+    "One person, one card: all notes, touches, coupons and tickets move over, and EVERY email and phone number is kept (extras land in the contact list). The payment email becomes the primary one.","Merge")) return;
   const ov=document.getElementById("mergeov"); if(ov) ov.remove();
-  // the person becomes ONE record with BOTH emails; the payment (client) email wins as primary
+  // the person becomes ONE record with EVERY contact: primary + alt slots
+  // first, everything that does not fit lands in the extra contacts. Nothing
+  // is ever dropped; the sync engines keep matching on the primary email.
   let primary=keep.email;
   if(dup.client && !keep.client && dup.email){ primary=dup.email; }
-  const altPick=[keep.email, dup.email, keep.alt, dup.alt].filter(e=>e && e!==primary)[0]||null;
+  const digitsOf=p=>String(p||"").replace(/\D/g,"");
+  const emails=[keep.email, keep.alt, dup.email, dup.alt].filter(Boolean)
+    .filter((e,i,a)=>a.findIndex(x=>x.toLowerCase()===e.toLowerCase())===i);
+  const altPick=emails.find(e=>e!==primary)||null;
+  const phones=[keep.phone, keep.altPhone, dup.phone, dup.altPhone].filter(Boolean)
+    .filter((p,i,a)=>a.findIndex(x=>digitsOf(x)===digitsOf(p))===i);
+  const mainPhone=phones[0]||null, altPhone=phones[1]||null;
+  const contacts=[...(keep.contacts||[])];
+  (dup.contacts||[]).forEach(c=>{ if(!contacts.some(k=>k.t===c.t&&String(k.v).toLowerCase()===String(c.v).toLowerCase())) contacts.push(c); });
+  emails.filter(e=>e!==primary&&e!==altPick).forEach(v=>{
+    if(!contacts.some(c=>c.t==="email"&&String(c.v).toLowerCase()===v.toLowerCase()))
+      contacts.push({t:"email", v, note:"from merge: "+(dup.name||"duplicate")}); });
+  phones.slice(2).forEach(v=>{
+    if(!contacts.some(c=>c.t==="phone"&&digitsOf(c.v)===digitsOf(v)))
+      contacts.push({t:"phone", v, note:"from merge: "+(dup.name||"duplicate")}); });
   const jobs=[
     sb.from("touches").update({person_id:keepId}).eq("person_id",dup.id),
     sb.from("coupons").update({person_id:keepId}).eq("person_id",dup.id),
     sb.from("tickets").update({person_id:keepId}).eq("person_id",dup.id),
     sb.from("clients").update({person_id:keepId}).eq("person_id",dup.id)
   ];
-  // phones: never lose one — main slot if free, otherwise the second slot
-  if(!keep.phone && dup.phone) jobs.push(sb.from("people").update({phone:dup.phone, phone_norm:dup.phone.replace(/\D/g,"")}).eq("id",keepId));
-  else if(keep.phone && dup.phone && keep.phone!==dup.phone && !keep.altPhone)
-    jobs.push(sb.from("people").update({alt_phone:dup.phone, alt_phone_norm:dup.phone.replace(/\D/g,"")}).eq("id",keepId));
   const rs=await Promise.all(jobs);
   const bad=rs.find(r=>r.error);
   if(bad){ hubAlert("Merge failed", esc(bad.error.message)); return; }
-  // free the duplicate's email first (unique index), then give the survivor both
+  // free the duplicate's email first (unique index), then give the survivor everything
   const r1=await sb.from("people").update({email:null, merged_into:keepId}).eq("id",dup.id);
-  const r2=await sb.from("people").update({email:primary||null, alt_email:altPick}).eq("id",keepId);
+  const r2=await sb.from("people").update({email:primary||null, alt_email:altPick,
+    phone:mainPhone, phone_norm:mainPhone?digitsOf(mainPhone):null,
+    alt_phone:altPhone, alt_phone_norm:altPhone?digitsOf(altPhone):null,
+    contacts}).eq("id",keepId);
   if(r1.error||r2.error){ hubAlert("Merge partially failed", esc((r1.error||r2.error).message)); return; }
   // Jira locations follow the surviving person too (they are server-written,
   // so the move goes through the guarded function)
@@ -1644,7 +1767,7 @@ window.doMerge = async (keepId, dupId) => {
     detail:(dup.name||"?")+" ("+(dup.email||dup.phone||"no contact")+") merged into "+(keep.name||"?"),
     undo:{dup_id:dup.id, dup_email:dup.email||null, keep_id:keepId,
           keep_email:keep.email||null, keep_alt:keep.alt||null}});
-  toast("Merged ✓ (both emails and phones kept)");
+  toast("Merged ✓ (every contact kept)");
   await loadData(); render();
 };
 /* merges used to be one-way; now the last one on a person can be taken back */
@@ -1939,7 +2062,13 @@ function moneySection(){
   const q=(document.getElementById("q").value||"").toLowerCase().trim();
   const set=activeCountries();
   const rbC = rangeBounds();
-  const cs=(window.__clients||[]).filter(cl=>
+  // rows of the same person merge into one line (a paying account and an empty
+  // checkout shell are one client, not two)
+  const mergedCls=(()=>{ const by={},out=[];
+    (window.__clients||[]).forEach(cl=>{ if(cl.person_id) (by[cl.person_id]=by[cl.person_id]||[]).push(cl); else out.push(cl); });
+    Object.values(by).forEach(rows=>out.push(mergeClientRows(rows)));
+    return out; })();
+  const cs=mergedCls.filter(cl=>
     (!q||[cl.name,cl.email].some(v=>(v||"").toLowerCase().includes(q)))
     && set.has(ccOfClient(cl))
     && (!rbC || (cl.first_paid_at && (!rbC.from || new Date(cl.first_paid_at)>=rbC.from)
@@ -2065,7 +2194,7 @@ const PANELS = {
       let arr=applyQ(followups());
       if(FILTER==="lt5") arr=arr.filter(l=>l.touches<5);
       if(FILTER==="coupon") arr=arr.filter(l=>l.coupon);
-      if(FILTER==="noanswer") arr=arr.filter(l=>l.attempted);
+      if(FILTER==="noanswer") arr=arr.filter(l=>l.attempted&&!l.replied);
       if(FILTER==="mine") arr=arr.filter(l=>l.assigned===ME);
       if(FILTER==="unassigned") arr=arr.filter(l=>!l.assigned);
       const fb=(id,lb)=>`<button class="fbtn ${FILTER===id?'active':''}" onclick="setFilter('${id}')">${lb}</button>`;
@@ -2138,16 +2267,10 @@ const PANELS = {
       const attempted=realArr.filter(l=>l.attempted).length;
       const cnt=s=>realArr.filter(l=>!l.isNew&&l.stage===s).length;
       const won=cnt("Won"), offers=cnt("Offer sent");
-      // "Contacted" is a status people set with different meanings; the call log
-      // decides whether a conversation ACTUALLY happened: a connected call, a
-      // held meeting, a logged WA call, or an email reply received from them
-      const spoke=l=>l.logs.some(g=>
-        (g.kind==="call" && (!g.detail || !/not reached/i.test(g.detail))) ||
-        (g.kind==="meeting" && !/CANCELED/.test(g.detail||"") && day(String(g.at).slice(0,10))<=TODAY) ||
-        (g.kind==="email" && !g.by_user) ||
-        (g.kind==="wa" && /WA call/i.test(g.detail||"")));
+      // "Contacted" is a status people set with different meanings; the log
+      // decides whether they actually answered (l.replied, computed in derive)
       const contacted=realArr.filter(l=>!l.isNew&&l.stage==="Contacted");
-      const cSpoke=contacted.filter(spoke).length;
+      const cSpoke=contacted.filter(l=>l.replied).length;
       const stages=[["New · untouched",untouched],["New · attempted",attempted],
         ["Contacted · spoke",cSpoke],["Contacted · no answer",contacted.length-cSpoke],
         ["Qualified",cnt("Qualified")],["Offer sent",offers],
@@ -2244,35 +2367,44 @@ const PANELS = {
       <h2>Mailboxes</h2>
       <p class="hint">Every mail you send or receive with a lead or a customer belongs in the hub, so each person connects their own mailbox here. Your password is scrambled inside your browser before it is sent: the hub stores only unreadable characters, and nobody, not an admin and not Claude, can read it back. Only the sync job can open it.</p>
       ${(()=>{
-        const mine=(window.__mailboxes||[]).find(m=>m.owner_email===ME);
         const key=STATS.mailboxKey;
         if(!key) return `<div class="card"><div class="row" style="cursor:default"><div class="who"><span class="nm">Connecting mailboxes is not switched on yet</span><div class="co">The server needs its mailbox key before anyone can connect. Ask Claude to finish the setup.</div></div></div></div>`;
-        if(mine) return `<div class="card"><div class="row" style="cursor:default">
-          <div class="who"><span class="nm">📬 ${esc(mine.email)}</span>
-            <div class="co">${mine.ok===false?esc(mine.error||"not working"):mine.ok?"Your mail is being sorted into tickets, leads and touches":"Connected, waiting for the first sync run"}</div></div>
-          <span class="chip" style="color:${mine.ok===false?"var(--crit)":mine.ok?"var(--goodtext)":"var(--ink2)"}">${mine.ok===false?"✗ not working":mine.ok?"✓ connected":"… pending"}${mine.last_sync?" · "+new Date(mine.last_sync).toLocaleString(undefined,{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):""}</span>
-          <button class="btn" onclick="mbConnect()">Change password</button>
-          <button class="btn" onclick="mbDisconnect('${esc(mine.email)}')">Disconnect</button>
+        const admin=window.PROFILE&&PROFILE.role==="admin";
+        const mbCard=(m,label)=>`<div class="card"><div class="row" style="cursor:default">
+          <div class="who"><span class="nm">📬 ${esc(m.email)}${m.shared?' <span class="chip">shared</span>':""}</span>
+            <div class="co">${m.broken?"Login keeps failing, so this mailbox is paused. Reconnect it with the current password and syncing resumes.":m.ok===false?esc(m.error||"not working"):m.ok?(label||"Mail is being sorted into tickets, leads and touches"):"Connected, waiting for the first sync run"}</div></div>
+          <span class="chip" style="color:${m.broken||m.ok===false?"var(--crit)":m.ok?"var(--goodtext)":"var(--ink2)"}">${m.broken?"⏸ paused":m.ok===false?"✗ not working":m.ok?"✓ connected":"… pending"}${m.last_sync?" · "+new Date(m.last_sync).toLocaleString(undefined,{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):""}</span>
+          ${(m.owner_email===ME||admin)?`<button class="btn${m.broken?" primary":""}" onclick="mbConnect(${m.shared?`'${esc(m.email)}'`:""})">${m.broken?"Reconnect":"Change password"}</button>
+          <button class="btn" onclick="mbDisconnect('${esc(m.email)}')">Disconnect</button>`:""}
         </div></div>`;
-        return `<div class="card"><div class="row" style="cursor:default">
+        const mine=(window.__mailboxes||[]).find(m=>m.owner_email===ME&&!m.shared);
+        const shared=(window.__mailboxes||[]).filter(m=>m.shared);
+        const others=(window.__mailboxes||[]).filter(m=>!m.shared&&m.owner_email!==ME);
+        let out = mine?mbCard(mine,"Your mail is being sorted into tickets, leads and touches"):`<div class="card"><div class="row" style="cursor:default">
           <div class="who"><span class="nm">Your mailbox is not connected</span>
             <div class="co">Connect it and your own conversations with leads and customers appear in the hub automatically, including the replies you send.</div></div>
           <button class="btn primary" onclick="mbConnect()">📬 Connect my mailbox</button>
         </div></div>`;
+        out += shared.map(m=>mbCard(m)).join("");
+        out += others.map(m=>mbCard(m)).join("");
+        if(admin) out += `<div class="acts" style="margin:2px 0 6px"><button class="btn" onclick="mbConnect('')" title="A team mailbox everyone works from. You type its password once; it is scrambled in this browser exactly like a personal one.">＋ Connect a shared mailbox</button></div>`;
+        return out;
       })()}
       ${(()=>{
+        // accounts still coming from repository secrets (transitional; the
+        // connected rows above are the future and already win over these)
         const acc=STATS.emailAccounts||null;
-        const legacy=[...new Set(Object.keys(STATS.emailState||{}).map(k=>k.split(":")[0]).filter(a=>a.includes("@")))];
-        const list=acc?Object.entries(acc):legacy.map(a=>[a,{ok:true}]);
+        const own=new Set((window.__mailboxes||[]).map(m=>m.email.toLowerCase()));
+        const list=acc?Object.entries(acc).filter(([mail])=>!own.has(mail.toLowerCase())):[];
         const card=([mail,s])=>`<div class="card"><div class="row" style="cursor:default">
-          <div class="who"><span class="nm">${esc(mail)}</span>
-          <div class="co">${s.ok?"Reading inbox + sent, sorting into tickets, leads and touches":"Login failed: "+esc(s.error||"check the password secret")}</div></div>
-          <span class="chip" style="${s.ok?'':'color:var(--crit)'}">${s.ok?"✓ connected":"✗ broken"}${s.at?" · "+new Date(s.at).toLocaleString(undefined,{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):""}</span>
+          <div class="who"><span class="nm">${esc(mail)} <span class="chip">via server secret</span></span>
+          <div class="co">${s.paused?esc(s.error||"paused"):s.ok?"Reading inbox + sent, sorting into tickets, leads and touches":"Login failed: "+esc(s.error||"check the password secret")}</div></div>
+          <span class="chip" style="${s.ok?'':'color:var(--crit)'}">${s.paused?"⏸ paused":s.ok?"✓ connected":"✗ broken"}${s.at?" · "+new Date(s.at).toLocaleString(undefined,{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):""}</span>
         </div></div>`;
-        return (list.map(card).join("")||'<div class="empty">No mailbox connected yet</div>')+
+        return list.map(card).join("")+
         `<div class="card"><div class="row" style="cursor:default">
           <div class="who"><span class="nm">${esc(ORG().supportEmail||"the shared support address")}</span>
-          <div class="co">No own login yet: support mail currently arrives through the connected inboxes, which works. When support@ gets its own IMAP login, an admin adds two secrets and it connects directly.</div></div>
+          <div class="co">This address is a forward into a connected inbox, so its mail already lands in the hub. If it ever gets its own login, an admin connects it above as a shared mailbox.</div></div>
           <span class="chip">via shared inbox</span>
         </div></div>`;
       })()}
@@ -2756,7 +2888,7 @@ function render(){
       `<div class="navfoot">
         ${(()=>{try{
           const bad=healthProblems();
-          const mb=(window.__mailboxes||[]).find(m=>m.owner_email===ME);
+          const mb=(window.__mailboxes||[]).find(m=>m.owner_email===ME&&!m.shared);
           const acc=STATS.emailAccounts, shared=acc?acc[ME]:null;   // ME may be a shared mailbox too
           const lines=[];
           if(bad.length) lines.push(`<a onclick="go('settings')" style="color:${bad.some(b=>b.state==="bad")?"var(--crit)":"var(--serious)"}" title="${esc(bad.map(b=>b.n+": "+b.msg).join(" · "))}">⚠ ${bad.length===1?bad[0].n+" sync "+(bad[0].state==="bad"?"failing":"stale"):bad.length+" syncs need attention"}</a>`);
@@ -3713,11 +3845,8 @@ const dupHidden = () => new Set(((window.__PREFS||{}).dupOk)||[]);
 /* company-group suggestions: 2+ people on one corporate email domain (free
    mailers and the own company domain never count). Suggestion only. */
 function groupSuggestions(){
-  const FREE=new Set(["gmail.com","yahoo.com","hotmail.com","outlook.com","web.de","gmx.de","gmx.net","gmx.at",
-    "t-online.de","aol.com","icloud.com","me.com","live.com","live.de","yahoo.de","hotmail.de","outlook.de",
-    "googlemail.com","protonmail.com","proton.me","mail.com","msn.com","yandex.com","freenet.de","arcor.de","mail.ru","ymail.com"]);
+  const FREE=FREE_MAIL, dm=mailDom;
   const own=(ORG().mailDomain||"").toLowerCase();
-  const dm=e=>{const m=(e||"").toLowerCase().match(/@(.+)$/);return m?m[1]:null;};
   const hid=new Set(((window.__PREFS||{}).grpOk)||[]);
   const byDom={};
   LEADS.filter(l=>!l.internal&&!l.gid).forEach(l=>{
@@ -3822,43 +3951,50 @@ async function encryptForServer(text){
   const buf = await crypto.subtle.encrypt({name:"RSA-OAEP"}, key, new TextEncoder().encode(text));
   return btoa(String.fromCharCode(...new Uint8Array(buf)));
 }
-window.mbConnect = () => {
-  const mine=(window.__mailboxes||[]).find(m=>m.owner_email===ME);
+window.mbConnect = (sharedEmail) => {
+  // no argument = your own mailbox; a string (even "") = admin connecting a
+  // shared team mailbox, "" for a new one, an address to change its password
+  const isShared = typeof sharedEmail === "string";
+  const mine = isShared
+    ? (window.__mailboxes||[]).find(m=>m.email===sharedEmail)
+    : (window.__mailboxes||[]).find(m=>m.owner_email===ME&&!m.shared);
   let ov=document.getElementById("mergeov"); if(ov) ov.remove();
   ov=document.createElement("div"); ov.id="mergeov";
-  ov.innerHTML=`<div class="mcard"><h3>📬 Connect my mailbox</h3>
-    <div class="meta">Your mail password is scrambled in this browser before it is sent. The hub keeps only the scrambled version, which nobody can read; the sync job opens it to fetch your mail and nothing else.</div>
-    <input class="li" id="mb-email" placeholder="Mailbox address" value="${esc((mine&&mine.email)||ME||"")}">
-    <input class="li" id="mb-pass" type="password" placeholder="Mail password (not your hub password)" autocomplete="new-password">
+  ov.innerHTML=`<div class="mcard"><h3>📬 ${isShared?"Connect a shared mailbox":"Connect my mailbox"}</h3>
+    <div class="meta">${isShared?"A team mailbox everyone works from. Its":"Your"} mail password is scrambled in this browser before it is sent. The hub keeps only the scrambled version, which nobody can read; the sync job opens it to fetch mail and nothing else.</div>
+    <input class="li" id="mb-email" placeholder="Mailbox address" value="${esc((mine&&mine.email)||(isShared?"":ME)||"")}">
+    <input class="li" id="mb-pass" type="password" placeholder="Mail password (not a hub password)" autocomplete="new-password">
     <div class="acts">
       <label class="chip">server <input class="li" id="mb-host" value="${esc((mine&&mine.host)||ORG().imapHost||"")}" placeholder="imap.yourprovider.tld" style="width:170px;padding:2px 6px"></label>
       <label class="chip">port <input class="li" id="mb-port" type="number" value="${(mine&&mine.port)||993}" style="width:70px;padding:2px 6px"></label>
     </div>
-    <div class="meta">The hub never marks your mail as read and never deletes anything: it only looks at who wrote to whom, the subject and a short preview.</div>
+    <div class="meta">The hub never marks mail as read and never deletes anything: it only looks at who wrote to whom, the subject and a short preview.</div>
     <div class="acts" style="justify-content:flex-end">
       <button class="btn" onclick="document.getElementById('mergeov').remove()">Cancel</button>
-      <button class="btn primary" onclick="mbSave()">Connect</button>
+      <button class="btn primary" onclick="mbSave(${isShared})">Connect</button>
     </div></div>`;
   ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
   document.body.appendChild(ov);
   ov.querySelector("#mb-pass").focus();
 };
-window.mbSave = async () => {
+window.mbSave = async (isShared) => {
   const g=id=>((document.getElementById(id)||{}).value||"").trim();
   const email=g("mb-email").toLowerCase(), pass=(document.getElementById("mb-pass")||{}).value||"";
-  if(!/^\S+@\S+\.\S+$/.test(email)){ toast("Enter your mailbox address"); return; }
+  if(!/^\S+@\S+\.\S+$/.test(email)){ toast("Enter the mailbox address"); return; }
   if(!pass){ toast("Enter the mail password"); return; }
   if(!g("mb-host")&&!ORG().imapHost){ toast("Enter the mail server (ask an admin if unsure)"); return; }
   let enc;
   try{ enc = await encryptForServer(pass); }
   catch(e){ hubAlert("Could not secure the password", esc(e.message)); return; }
+  // a fresh password always resets the circuit breaker: the sync tries again
   const row={ email, owner_email:ME, host:g("mb-host")||ORG().imapHost||"", port:parseInt(g("mb-port"),10)||993,
-    pass_enc:enc, active:true, ok:null, error:null, updated_at:new Date().toISOString() };
+    pass_enc:enc, active:true, ok:null, error:null, fail_count:0, broken:false,
+    shared:!!isShared, updated_at:new Date().toISOString() };
   const {error}=await sb.from("mailboxes").upsert(row);
   if(error){ hubAlert("Could not save", esc(error.message)+(/duplicate|policy/i.test(error.message)?"<br><br>That address may already be connected by someone else.":"")); return; }
   const ov=document.getElementById("mergeov"); if(ov) ov.remove();
-  window.__mailboxes=[...(window.__mailboxes||[]).filter(m=>m.owner_email!==ME), row];
-  logAudit("mailbox",{detail:"connected "+email});
+  window.__mailboxes=[...(window.__mailboxes||[]).filter(m=>m.email!==row.email&&(isShared||m.owner_email!==ME||m.shared)), row];
+  logAudit("mailbox",{detail:"connected "+email+(isShared?" (shared)":"")});
   render(false);
   const v=await hubDialog({title:"📬 Mailbox connected",
     body:"Your mail joins the hub on the next sync run. Start one now and it takes about two minutes.",
