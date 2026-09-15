@@ -580,7 +580,7 @@ async function loadData(delta){
   if(!canDelta){
     const [p, t, cp, tm] = await Promise.all([
       fetchAll("people","*","created_at"),
-      fetchAll("touches","id,person_id,kind,at,detail,by_user,snippet","id"),
+      fetchAll("touches","id,person_id,kind,at,detail,by_user,snippet,via","id"),
       fetchAll("coupons","code,person_id,issued_at,expires_at,redeemed,raw,updated_at","id"),
       fetchAll("ticket_messages","*","id"),
     ]);
@@ -590,7 +590,7 @@ async function loadData(delta){
     const m = RAW.mark;
     const [p, t, cp, tm] = await Promise.all([
       sb.from("people").select("*").gt("updated_at", m.people).limit(1000),
-      sb.from("touches").select("id,person_id,kind,at,detail,by_user,snippet").gt("id", m.touchId).order("id").limit(1000),
+      sb.from("touches").select("id,person_id,kind,at,detail,by_user,snippet,via").gt("id", m.touchId).order("id").limit(1000),
       sb.from("coupons").select("code,person_id,issued_at,expires_at,redeemed,raw,updated_at").gt("updated_at", m.coupons||"").limit(1000),
       sb.from("ticket_messages").select("*").gt("id", m.tmsgId).order("id").limit(1000),
     ]);
@@ -603,7 +603,7 @@ async function loadData(delta){
     // counts and fall back to a full load for that table when they drift
     const [cP, cT] = await Promise.all([rowCount("people"), rowCount("touches")]);
     if(cP!==null && cP!==RAW.people.length){ const r=await fetchAll("people","*","created_at"); if(!r.error) RAW.people=r.data; }
-    if(cT!==null && cT!==RAW.touches.length){ const r=await fetchAll("touches","id,person_id,kind,at,detail,by_user,snippet","id"); if(!r.error) RAW.touches=r.data; }
+    if(cT!==null && cT!==RAW.touches.length){ const r=await fetchAll("touches","id,person_id,kind,at,detail,by_user,snippet,via","id"); if(!r.error) RAW.touches=r.data; }
   }
   if(e1||e2||e3||e4){ hubAlert("Load error", esc((e1||e2||e3||e4).message)); return; }
   RAW.mark.people  = maxOf(RAW.people,"updated_at") || new Date().toISOString();
@@ -974,6 +974,15 @@ function orphanKidsFor(l){
     return kd.length===9 && ph9.includes(kd);
   }).sort((a,b)=>String(b.jira_created||"").localeCompare(String(a.jira_created||"")));
 }
+/* one honest payment state everywhere: ⏳ pending (no attempt yet, noise),
+   🔁 retrying (Stripe is on it, wait), ⚠ actionable (2+ failed attempts or
+   failing for 3+ days, or Stripe gave up) - only actionable is work */
+function ppState(p){
+  if((p.status||"")==="uncollectible") return "actionable";
+  if(!(p.attempts>0)) return "pending";
+  const days=(Date.now()-new Date(p.due_date||p.invoice_created||Date.now()))/86400000;
+  return (p.attempts>=2||days>=3)?"actionable":"retrying";
+}
 /* payment problems of a person, matched over every email we know for them */
 function ppOf(l){
   const ems=[l.email,l.alt,...clientRowsOf(l).map(cl=>cl.email)].filter(Boolean).map(e=>e.toLowerCase());
@@ -1289,25 +1298,58 @@ function opsItems(){
     const j=locByKey[k.parent_key];
     const qk=dFrom(k.jira_updated)>30;   // untouched in Jira for a month: probably done, just never closed
     if(k.project==="RK"&&kidOpen(k)){
-      out.push({id:"service:"+k.key, quiet:qk, kind:"service", icon:"🔧", our:k.status!=="RK_DELIVERY_WAITING", age:dFrom(k.jira_created),
-        title:(k.summary||k.key)+" · "+(k.status||""), who:j?personLoc(j):esc(k.summary||k.key), key:k.key, loc:j, kid:k});
+      /* RK splits by what Jira says it IS: RR = the client is returning
+         (termination or cancellation - follow up, track the hardware coming
+         back), RP = replacement swap, RC = repair. Everything was lumped
+         under "service" before, which hid returns and replacements. */
+      const tt=String(k.ticket_type||"");
+      const kind=/^RR/.test(tt)?"return":/^RP/.test(tt)?"replacement":"service";
+      const icon=kind==="return"?"↩":kind==="replacement"?"🔁":"🔧";
+      out.push({id:"service:"+k.key, quiet:qk, kind, icon, our:k.status!=="RK_DELIVERY_WAITING", age:dFrom(k.jira_created),
+        title:(k.summary||k.key)+" · "+(k.status||"")+(tt?" · "+tt:""), who:j?personLoc(j):esc(k.summary||k.key), key:k.key, loc:j, kid:k});
     }
     if(k.project==="SH"&&kidOpen(k)){
       out.push({id:"shipment:"+k.key, quiet:qk, kind:"shipment", icon:"📦", our:k.status==="DATA VALIDATION", age:dFrom(k.date_shipment||k.jira_created),
         title:(k.status||"open")+(k.date_shipment?" · shipped "+dstr(k.date_shipment):""), who:j?personLoc(j):esc(k.summary||k.key), key:k.key, loc:j, kid:k});
-      if(k.questionnaire_sent&&!k.questionnaire_filled)
-        out.push({id:"questionnaire:"+k.key, quiet:qk, kind:"questionnaire", icon:"📋", our:dFrom(k.questionnaire_sent)>7, age:dFrom(k.questionnaire_sent),
-          title:"questionnaire sent "+dstr(k.questionnaire_sent)+", not filled", who:j?personLoc(j):esc(k.summary||k.key), key:k.key, loc:j, kid:k});
+      /* a questionnaire only matters while it BLOCKS shipping: sent, not
+         filled, nothing shipped yet. Once hardware moves, "not filled" is
+         stale bookkeeping (SH-1304), never an action. */
+      if(k.questionnaire_sent&&!k.questionnaire_filled&&!k.date_shipment&&!k.tracking_number&&!k.tracking_link)
+        out.push({id:"questionnaire:"+k.key, quiet:qk, kind:"questionnaire", icon:"📋", our:true, age:dFrom(k.questionnaire_sent),
+          title:"questionnaire sent "+dstr(k.questionnaire_sent)+", not filled - chase the client, shipping is blocked", who:j?personLoc(j):esc(k.summary||k.key), key:k.key, loc:j, kid:k});
     }
   }
+  /* Jira @mentions addressed to the signed-in user become work items:
+     "Daniel asked you: ..." - everyone sees their own mentions. */
+  try{
+    const meRow=(window.__users||[]).find(u=>u.email===ME);
+    const first=((meRow&&meRow.name)||String(ME||"").split("@")[0]||"").trim().split(/\s+/)[0];
+    if(first){
+      const re=new RegExp("@"+first.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b","i");
+      for(const cm of (RAW.jcom||[])){
+        if(!cm.body||!re.test(cm.body)) continue;
+        if(/^ordercube support$/i.test(cm.author||"")) continue;   // automated customer mails, not a colleague
+        const ask=cm.body.replace(/\[cid:[^\]]*\]/g," ").replace(/@[A-Za-zÀ-ž]+( [A-Za-zÀ-ž]+)?/g," ").replace(/\s+/g," ").trim().slice(0,140);
+        const p=cm.person_id&&byId[cm.person_id];
+        out.push({id:"mention:"+cm.id, quiet:dFrom(cm.at)>30, kind:"mention", icon:"🗣", our:true, age:dFrom(cm.at),
+          title:esc(cm.author||"Someone")+" asked you: "+esc(ask||cm.issue_title||""), who:p?esc(p.name):esc(cm.issue_title||cm.issue_key||"?"),
+          key:cm.issue_key, loc:p?null:undefined, kid:cm.person_id?{person_id:cm.person_id}:null});
+      }
+    }
+  }catch(e){}
   const cliByStripe={}; (window.__clients||[]).forEach(c2=>{ if(c2.stripe_id) cliByStripe[c2.stripe_id]=c2; });
   for(const p of (window.__pprobs||[])){
+    /* only ACTIONABLE failures are work: 2+ failed attempts, failing for 3+
+       days, or Stripe gave up. Pending invoices and fresh retries stay off
+       this list (they live quietly on the person card) so nobody calls a
+       client whose card merely hiccuped once. */
+    if(ppState(p)!=="actionable") continue;
     // a payment AFTER this invoice was created usually means they settled it
     // through a newer invoice: the old one is probably stale, void it in Stripe
     const cl2=p.stripe_customer&&cliByStripe[p.stripe_customer];
     const paidSince=!!(cl2&&cl2.last_paid_at&&p.invoice_created&&new Date(cl2.last_paid_at)>new Date(p.invoice_created));
     out.push({id:"payment:"+p.invoice_id, quiet:dFrom(p.invoice_created)>60, kind:"payment", icon:"💳", our:true, age:dFrom(p.invoice_created),
-      title:Math.round((p.amount||0)/100)+"€ "+(p.status==="uncollectible"?"uncollectible":"unpaid")
+      title:Math.round((p.amount||0)/100)+"€ "+(p.status==="uncollectible"?"uncollectible":"failing "+dFrom(p.due_date||p.invoice_created)+"d")
         +(p.attempts?" · "+p.attempts+" attempt"+(p.attempts>1?"s":""):"")
         +(p.next_retry?" · retry "+new Date(p.next_retry).toLocaleDateString():"")
         +(paidSince?" · 💰 paid again since this invoice, probably superseded":"")
@@ -1416,11 +1458,13 @@ function phead(l){
     ${l.gid&&(window.__groupBy||{})[l.gid]?`<span class="chip jump" onclick="groupDialog(${l.gid})" title="Company group: several people, one company. Click for members and the covered switch.">🏢 ${esc((window.__groupBy||{})[l.gid].name)} · ${((window.__groupMembers||{})[l.gid]||[]).length}${((window.__groupMembers||{})[l.gid]||[]).some(id=>(byId[id]||{}).client)?" · 💰 pays":""}</span>`:""}
     ${l.due&&day(l.due)&&day(l.due)>TODAY?`<span class="chip" title="Personal reminder set">⏰ ${day(l.due).toLocaleDateString(undefined,{day:"numeric",month:"short"})}</span>`:""}
     ${l.client?`<span class="chip life-client" title="Every payment is in the timeline below; Stripe ↗ opens the customer">💰 ${esc(eur(l.client.total_paid,l.client.currency))} · ${l.client.payments}× paid</span>`:""}
-    ${(()=>{ // "failed" only when Stripe has given up; a scheduled retry is just pending
+    ${(()=>{ /* ⚠ only when a payment is really failing (2+ attempts or 3+ days);
+        a fresh retry shows quietly, a pending invoice shows nothing at all */
       const fp=ppOf(l); if(!fp.length) return "";
-      const rt=fp.filter(p=>p.next_retry&&new Date(p.next_retry)>new Date()).length, fl=fp.length-rt;
-      const lbl=[fl?`⚠ ${fl} failed payment${fl>1?"s":""}`:"",rt?`⏳ ${rt} payment${rt>1?"s":""} retrying`:""].filter(Boolean).join(" · ");
-      return `<span class="chip jump" style="color:${fl?"var(--crit)":"var(--ink2)"}" onclick="go('ops');window.__OPS={kind:'payment'}" title="${esc(fp.map(p=>Math.round(p.amount/100)+"€ · "+(p.reason||p.status)).join(" · "))}">${lbl} →</span>`; })()}
+      const fl=fp.filter(p=>ppState(p)==="actionable").length, rt=fp.filter(p=>ppState(p)==="retrying").length;
+      if(!fl&&!rt) return "";
+      const lbl=[fl?`⚠ ${fl} failing payment${fl>1?"s":""}`:"",rt?`🔁 ${rt} retrying`:""].filter(Boolean).join(" · ");
+      return `<span class="chip jump" style="color:${fl?"var(--crit)":"var(--ink2)"}" onclick="go('ops');window.__OPS={kind:'payment'}" title="${esc(fp.map(p=>Math.round(p.amount/100)+"€ · "+ppState(p)+(p.reason?" · "+p.reason:"")).join(" · "))}">${lbl} →</span>`; })()}
     ${locsFor(l).length?`<span class="chip jump" onclick="document.getElementById('locs-${l.id}')?.scrollIntoView({behavior:'smooth'})" title="Contracts, shipments and service from Jira">📍 ${locsFor(l).length} location${locsFor(l).length>1?"s":""}</span>`:""}
     ${!locsFor(l).length&&orphanKidsFor(l).length?`<span class="chip jump" onclick="document.getElementById('locs-${l.id}')?.scrollIntoView({behavior:'smooth'})" title="Shipments or service tickets in Jira that have no location ticket yet">📦 ${orphanKidsFor(l).length} in Jira</span>`:""}
     ${openT?`<span class="chip jump" onclick="jumpSearch('support','${esc(l.email||l.name)}')" title="Open their tickets in Support">🎫 ${openT} open →</span>`:""}
@@ -1581,7 +1625,8 @@ function timeline(l){
         :g.kind==="email"?(g.detail||"Email")
         :g.kind==="call"?(g.detail||"Call")
         :(g.detail||"WhatsApp touch")).replace(/\s*\[(cal|pt):[^\]]+\]/g,"")   // internal sync tags stay out of sight
-        +(g.by_user?" · "+String(g.by_user).split("@")[0]:""),
+        +(g.by_user?" · "+String(g.by_user).split("@")[0]:"")
+        +(g.via?" · via "+String(g.via).split("@")[0]+"@":""),
       snip:g.kind==="email"?(g.snippet||null):null,
       del:(g.id && (g.kind==="wa" || (g.kind==="call" && !imported(g))))?g.id:null})),
     ...l.coupons.map(cp=>({d:String(cp.issued||"").slice(0,10), i:"🎟",
@@ -1604,9 +1649,10 @@ function timeline(l){
         i:"💶", t:"Payment "+eur(p2.amt,l.client.currency)+(p2.inv?" · invoice "+String(p2.inv).slice(-10):"")};
     }):[]),
     ...(typeof ppOf==="function"?ppOf(l):[]).map(p=>{
-      const retry=p.next_retry&&new Date(p.next_retry)>new Date();
-      return {d:String(p.invoice_created||"").slice(0,10), i:"⚠",
-        t:(retry?"Payment retrying · ":"Payment failed · ")+Math.round((p.amount||0)/100)+"€"+(p.reason?" · "+p.reason:"")};
+      const st=typeof ppState==="function"?ppState(p):"actionable";
+      return {d:String(p.invoice_created||"").slice(0,10), i:st==="actionable"?"⚠":st==="retrying"?"🔁":"⏳",
+        t:(st==="actionable"?"Payment failing · ":st==="retrying"?"Payment retrying (Stripe is on it) · ":"Invoice pending · ")
+          +Math.round((p.amount||0)/100)+"€"+(p.attempts?" · "+p.attempts+" attempt"+(p.attempts>1?"s":""):"")+(p.reason?" · "+p.reason:"")};
     })
   ].filter(e=>e.d).sort((a,b)=>b.d.localeCompare(a.d));
 }
@@ -2082,18 +2128,21 @@ function moneySection(){
   const firsts=cs.map(c=>c.first_paid_at).filter(Boolean).map(d=>new Date(d));
   const monthsActive=Math.max(1,firsts.length?Math.round((Date.now()-Math.min(...firsts))/2592000000):1);
   const monthly=totalRev/monthsActive;
+  const mrrNow=cs.reduce((a,c)=>a+(c.mrr||0),0);
+  const failNow=(window.__pprobs||[]).filter(p=>ppState(p)==="actionable");
+  const CAPM=q?cs.length:(window.__moneyCap||12);
   return `<h2>💶 Money</h2>
-  <p class="hint">Everyone who paid, straight from Stripe. Country and date filters apply (date = first payment, so ranges show new-client cohorts). Click a row for the full person card: payments, locations, tickets, lead story. Individual receipts sit in the card's timeline and in Stripe.</p>
+  <p class="hint">The picture, not the phone book: totals up top, the biggest accounts below (${CAPM<cs.length?"top "+CAPM+" of "+cs.length:"all "+cs.length}, by the chosen sort). Type in search to find any payer; every client's full payment story lives on their person card. Chasing failing payments happens in Operations → 💳.</p>
   <div class="tiles">
     <div class="tile"><div class="v">${cs.length}</div><div class="l">Paying clients</div></div>
     <div class="tile"><div class="v">${eur(totalRev)}</div><div class="l">Collected, all time</div></div>
-    <div class="tile"><div class="v">${eur(totalRev/Math.max(1,cs.length))}</div><div class="l">Avg per client</div></div>
+    <div class="tile"><div class="v">${eur(mrrNow)}</div><div class="l">MRR right now</div></div>
     <div class="tile"><div class="v">${eur(monthly)}</div><div class="l">Monthly run-rate</div></div>
-    <div class="tile"><div class="v">${eur(monthly*12)}</div><div class="l">Projected 12 months</div></div>
+    <div class="tile click" onclick="go('ops');window.__OPS={kind:'payment'}"><div class="v">${Math.round(failNow.reduce((a,p)=>a+(p.amount||0),0)/100).toLocaleString()}€</div><div class="l">⚠ Really failing</div><div class="s">${failNow.length} invoice${failNow.length===1?"":"s"} → Operations</div></div>
   </div>
   <div class="filters">${sortSelX("clients",[["total","Sort: total paid"],["mrr","Sort: MRR"],["last","Sort: last payment"]],"total")}
     <button class="fbtn" onclick="window.__SORTDIR=window.__SORTDIR||{};window.__SORTDIR.money=(window.__SORTDIR.money||'desc')==='desc'?'asc':'desc';render(false)" title="Flip the sort order">${((window.__SORTDIR||{}).money||"desc")==="desc"?"↓ high to low":"↑ low to high"}</button></div>
-  ${cs.map(cl=>{
+  ${cs.slice(0,CAPM).map(cl=>{
     const lead = (cl.person_id&&byId[cl.person_id]) || null;
     const last = cl.last_paid_at? daysAgo(new Date(String(cl.last_paid_at).slice(0,10)+"T00:00:00")) : null;
     return `<div class="card"><div class="row" ${lead?`onclick="openPerson('${lead.id}')" title="Open the person card"`:'style="cursor:default"'}>
@@ -2105,7 +2154,8 @@ function moneySection(){
       <span class="badge-t">${eur(cl.total_paid,cl.currency)}</span>
       <span class="meta">${last===null?"":(last===0?"paid today":"paid "+last+"d ago")}</span>
     </div></div>`;
-  }).join("")||'<div class="empty">No paying clients found</div>'}`;
+  }).join("")||'<div class="empty">No paying clients found</div>'}
+  ${cs.length>CAPM?`<div class="acts" style="justify-content:center;margin:10px 0"><button class="btn" onclick="window.__moneyCap=(window.__moneyCap||12)+50;render(false)">↓ Show 50 more (${cs.length-CAPM} left)</button></div>`:""}`;
 }
 /* The last seven days: real activity, not statuses. Lives in Reports. */
 function weeklySection(){
@@ -2430,7 +2480,12 @@ const PANELS = {
     }
   },
   support: {
-    title:"Support", count:()=>((window.__tickets)||[]).filter(t=>t.state!=="resolved"&&!t.junked).length,
+    /* the badge follows the country filter like the rows do; tickets whose
+       country is unknown always count (hiding them would lie) */
+    title:"Support", count:()=>{ try{ const g=activeCountries();
+      return ((window.__tickets)||[]).filter(t=>{ if(t.state==="resolved"||t.junked) return false;
+        const p=t.person_id&&byId[t.person_id]; const c=p?p.cc:"?"; return c==="?"||g.has(c); }).length;
+      }catch(e){ return ((window.__tickets)||[]).filter(t=>t.state!=="resolved"&&!t.junked).length; } },
     render(){
       const ts=(window.__tickets||[]);
       const q=(document.getElementById("q").value||"").toLowerCase().trim();
@@ -2473,6 +2528,7 @@ const PANELS = {
             <div class="co">${esc(t.subject||"")}</div></div>
           <span class="chip" style="cursor:${window.CANW!==false?'pointer':'default'}" title="Detected from the first message body. Wrong? Click to flip DE/EN." onclick="${window.CANW!==false?`langFlip(${t.id});event.stopPropagation()`:''}">${t.language==="de"?"🇩🇪 DE":"🇬🇧 EN"}</span>
           ${msgs.length?`<span class="badge-t">${msgs.length}✉</span>`:""}
+          ${t.via?`<span class="chip" title="This thread travelled through ${esc(t.via)}">📥 ${esc(String(t.via).split("@")[0])}@</span>`:""}
           ${lead?`<span class="chip jump ${lifecycleOf(lead)==="client"?"life-client":"stage"}" onclick="openPerson('${lead.id}');event.stopPropagation()" title="Open their person card: full history, numbers, locations, payments">${lifecycleOf(lead)==="client"?"💰 client":"✦ lead"} →</span>`:""}
           ${lead&&locsFor(lead).some(j=>((window.__kidsByParent||{})[j.key]||[]).some(k=>k.project==="RK"&&kidOpen(k)))?`<span class="chip jump" onclick="go('ops');window.__OPS={kind:'service'};event.stopPropagation()" title="This customer also has an open service ticket in Jira">🔧 Jira service →</span>`:""}
           ${(t.assignees||[]).length?`<span class="chip asg" title="Assigned to ${esc((t.assignees||[]).join(", "))}">👤 ${(t.assignees||[]).map(a=>esc(String(a).split("@")[0])).join(" + ")}</span>`:""}
@@ -2523,13 +2579,15 @@ const PANELS = {
     }
   },
   ops: {
-    title:"Operations", count:()=>{ try{ const h=window.__opsHidden||new Map();
-      return opsItems().filter(i=>i.our&&!i.quiet&&!h.has(i.id)).length||""; }catch(e){ return "!"; } },
+    title:"Operations", count:()=>{ try{ const h=window.__opsHidden||new Map(); const g=activeCountries();
+      return opsItems().filter(i=>{ if(!i.our||i.quiet||h.has(i.id)) return false;
+        const p=(i.loc&&i.loc.person_id&&byId[i.loc.person_id])||(i.kid&&i.kid.person_id&&byId[i.kid.person_id]);
+        const c=p?p.cc:"?"; return c==="?"||g.has(c); }).length||""; }catch(e){ return "!"; } },
     render(){
       const O=window.__OPS||(window.__OPS={kind:"all"});
       const all=opsItems(), H=window.__opsHidden||new Map();
-      const KINDS=[["all","Everything"],["payment","💳 Payments"],["service","🔧 Service"],["shipment","📦 Shipments"],
-        ["questionnaire","📋 Questionnaires"],["test","🧪 Test periods"],["renewal","🔄 Renewals"],["check","⚖ Checks"]];
+      const KINDS=[["all","Everything"],["mention","🗣 For you"],["payment","💳 Payments"],["return","↩ Returns"],["replacement","🔁 Replacements"],
+        ["service","🔧 Service"],["shipment","📦 Shipments"],["questionnaire","📋 Questionnaires"],["test","🧪 Test periods"],["renewal","🔄 Renewals"],["check","⚖ Checks"]];
       const so=(window.__SORTX||{}).ops||"new";
       const arr=(O.kind==="all"?all:all.filter(i=>i.kind===O.kind)).sort(
         so==="amount"?(a,b)=>(((b.pp||{}).amount)||0)-(((a.pp||{}).amount)||0)
@@ -2564,7 +2622,7 @@ const PANELS = {
           <span class="meta ${i.age>=14?'quiet':''}">${i.age?i.age+"d old":(i.due!=null&&i.due>0?"in "+i.due+"d":"now")}</span>
         </div></div>`;
       };
-      return `<p class="hint">What is actually moving right now, read from Jira and Stripe. Anything untouched for 30+ days folds into "quiet" below: still open in the source, probably finished in reality. ✓ marks an item not active by hand (Jira is never touched). Unpaid right now: ${Math.round((window.__pprobs||[]).reduce((a,p)=>a+(p.amount||0),0)/100).toLocaleString()}€.</p>
+      return `<p class="hint">What is actually moving right now, read from Jira and Stripe: mentions addressed to you, failing payments (the finance home: only real failures show, pending invoices and fresh retries stay hidden until a payment fails twice or for 3+ days), returns to follow up on terminations, replacement swaps, shipments and blocked questionnaires. Anything untouched for 30+ days folds into "quiet" below. ✓ marks an item not active by hand (Jira is never touched). Really failing right now: ${Math.round((window.__pprobs||[]).filter(p=>ppState(p)==="actionable").reduce((a,p)=>a+(p.amount||0),0)/100).toLocaleString()}€${(()=>{const pn=(window.__pprobs||[]).filter(p=>ppState(p)!=="actionable").length;return pn?" ("+pn+" more pending or retrying, hidden on purpose)":"";})()}.</p>
       <div class="filters">${KINDS.map(([k,lb])=>`<button class="fbtn ${O.kind===k?'active':''}" onclick="window.__OPS.kind='${k}';render()">${lb} ${cnt(k)?"("+cnt(k)+")":""}</button>`).join("")}
         ${sortSelX("ops",[["new","Sort: newest first"],["old","Sort: oldest first"],["amount","Sort: highest amount (payments)"],["attempts","Sort: most attempts (payments)"]],"new")}</div>
       <h2>Our move (${ours.length})</h2>
@@ -2578,16 +2636,23 @@ const PANELS = {
     }
   },
   people: {
-    /* All = the untouched full registry. The lead/client/support sub-views are
-       working views, so THERE the global filters (countries, dates, callable)
-       apply, money sorts only make sense for clients, and lead views get the
+    /* Every view follows the country filter (unknown country always shows);
+       the lead/client/support sub-views additionally apply dates + callable,
+       money sorts only make sense for clients, and lead views get the
        Mine/Unassigned owner filter. */
-    title:"People", filterable:true, count:()=>LEADS.length+((window.__extraPeople||[]).length),
+    title:"People", filterable:true,
+    /* the badge and the "All" view follow the country filter now (searching
+       still finds anyone); unknown-country people always stay visible */
+    count:()=>{ try{ const g=activeCountries();
+      return LEADS.filter(l=>!l.internal&&(l.cc==="?"||g.has(l.cc))).length+((window.__extraPeople||[]).length);
+      }catch(e){ return LEADS.length+((window.__extraPeople||[]).length); } },
     render(){
       const q=(document.getElementById("q").value||"").toLowerCase().trim();
+      const gPeople=activeCountries();
       // colleagues are not leads: they only show when explicitly searched for
-      let arr=LEADS.filter(l=>(!l.internal||q) && (!q||matchLead(l,q)));
-      let extras=(window.__extraPeople||[]).filter(p=>!q||[p.name,p.email].some(v=>(v||"").toLowerCase().includes(q)));
+      let arr=LEADS.filter(l=>(!l.internal||q) && (!q||matchLead(l,q)) && (q||l.cc==="?"||gPeople.has(l.cc)));
+      let extras=(window.__extraPeople||[]).filter(p=>(!q||[p.name,p.email].some(v=>(v||"").toLowerCase().includes(q)))
+        && (q||(()=>{ try{ const c=p.cl?ccOfClient(p.cl):"?"; return c==="?"||gPeople.has(c); }catch(e){ return true; } })()));
       const F=window.__PF||"all";
       const inView = F==="all" ? (x=>x) : applyView;   // "All" means ALL, filters kick in on the sub-views
       const counts={all:arr.length+extras.length,lead:0,client:0,support:0};
@@ -2600,8 +2665,8 @@ const PANELS = {
       const PO=window.__PFO||"all";   // owner filter, lead views only
       if(F==="lead"&&PO==="mine") arr=arr.filter(l=>l.assigned===ME);
       if(F==="lead"&&PO==="un") arr=arr.filter(l=>!l.assigned);
-      const PC=!!window.__PFC;        // clients with failing/retrying invoices only
-      if(F==="client"&&PC) arr=arr.filter(l=>ppOf(l).length);
+      const PC=!!window.__PFC;        // clients with failing/retrying invoices only (pending is noise)
+      if(F==="client"&&PC) arr=arr.filter(l=>ppOf(l).some(p=>ppState(p)!=="pending"));
       const fb=(id,lb)=>`<button class="fbtn ${F===id?'active':''}" onclick="setPF('${id}')">${lb}</button>`;
       const fo=(id,lb)=>`<button class="fbtn ${PO===id?'active':''}" onclick="window.__PFO='${id}';render(false)">${lb}</button>`;
       const prow=p=>`<div class="card"><div class="row" onclick="jumpSearch('${p.pseudo==="client"?"funnel":"support"}','${esc(p.email||p.name)}')">
@@ -2626,7 +2691,7 @@ const PANELS = {
                   ...extras.map(p=>({n:(p.name||"").toLowerCase(), act:0, cl:p.cl||null, pp:0, h:()=>prow(p)}))].sort(cmp);
       if(dir==="asc") rows.reverse();
       const CAP=(window.__pplCap||120);
-      return `<p class="hint">Everyone the hub knows, one entry per human, whatever the source: Salesforce, coupons, email, Stripe, support mail, manual. "All" ignores the filters on purpose; the Leads and Clients views follow them. Slim cards mean the person exists only in Stripe or the support inbox so far; click them to jump to their data.</p>
+      return `<p class="hint">Everyone the hub knows, one entry per human, whatever the source: Salesforce, coupons, email, Stripe, support mail, manual. Every view here follows the country filter (people with no known country always show); searching finds anyone regardless. Slim cards mean the person exists only in Stripe or the support inbox so far; click them to jump to their data.</p>
       <div class="filters">${fb("all","All · "+counts.all)}${fb("lead","✦ Leads · "+counts.lead)}${fb("client","💰 Clients · "+counts.client)}${counts.support||F==="support"?fb("support","🎧 Support-only · "+counts.support):""}
         ${F==="lead"?fo("all","Everyone")+fo("mine","👤 Mine")+fo("un","Unassigned"):""}
         ${F==="client"?`<button class="fbtn ${PC?'active':''}" onclick="window.__PFC=!window.__PFC;render(false)" title="Only clients with a failing or retrying invoice right now">⚠ Payment issues</button>`:""}
