@@ -883,7 +883,7 @@ function leadRow(l, extra){
             ${(window.__users||[]).filter(u=>u.email!==ME).map(u=>`<option value="${esc(u.email)}">${esc(u.name||u.email.split("@")[0])}</option>`).join("")}
             ${l.assigned?`<option value="__clear">✗ unassign</option>`:""}
           </select>
-          <select class="st" onchange="snooze('${l.id}',this.value);this.selectedIndex=0" onclick="event.stopPropagation()" title="Personal reminder: the lead hides from the queue and resurfaces on that day">
+          <select class="st" onchange="snooze('${l.id}',this.value);this.selectedIndex=0" onclick="event.stopPropagation()" title="Creates a reminder for you and hides the lead from the queues until that day. 'Pick a date…' also lets you remind teammates.">
             <option value="">⏰ Remind me…</option>
             <option value="1">tomorrow</option>
             <option value="3">in 3 days</option>
@@ -1912,21 +1912,23 @@ window.logCall = async id => {
 window.snooze = async (id,v) => {
   if(!v) return;
   const l=byId[id]; if(!l) return;
-  let dt=null;
-  if(v==="custom"){
-    const picked=await hubPrompt("⏰ Remind me about "+esc(l.name||"this lead"), {input:"date", okLabel:"Set reminder"});
-    if(!picked) return;
-    dt=picked;
-  } else if(v!=="clear"){
-    const d=new Date(TODAY); d.setDate(d.getDate()+ +v);
-    // format in LOCAL time; toISOString would shift the date on non-UTC machines
-    dt=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  const keepOpen=()=>{ const card=document.querySelector(`.card[data-id="${id}"]`); if(card) card.classList.add("open"); };
+  if(v==="custom"){ remDialog("sales",{person_id:id,snooze:true},(l.name||"")+(l.co?" · "+l.co:"")); keepOpen(); return; }
+  if(v==="clear"){
+    l.due=null; derive(l); render(false); keepOpen();
+    const {error}=await sb.from("people").update({next_due:null}).eq("id",id);
+    if(error){ hubAlert("Save failed", esc(error.message)); return; }
+    // my own open snooze reminders on this person go too; other people's stay theirs
+    await sb.from("reminders").delete().eq("person_id",id).eq("owner",ME).eq("snooze",true).is("done_at",null);
+    window.__rems=(window.__rems||[]).filter(r=>!(r.snooze&&r.person_id===id&&r.owner===ME&&!r.done_at));
+    toast("Reminder cleared"); render(false); return;
   }
-  l.due=dt; derive(l); render(false);
-  const card=document.querySelector(`.card[data-id="${id}"]`); if(card) card.classList.add("open");
-  toast(dt ? "Reminder set: "+day(dt).toLocaleDateString(undefined,{day:"numeric",month:"short"})+", resurfaces on Today + Follow-ups then" : "Reminder cleared");
-  const {error}=await sb.from("people").update({next_due:dt}).eq("id",id);
-  if(error) hubAlert("Save failed", esc(error.message));
+  const d=new Date(TODAY); d.setDate(d.getDate()+ +v);
+  // format in LOCAL time; toISOString would shift the date on non-UTC machines
+  const dt=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  keepOpen();
+  await remSave({kind:"sales", person_id:id, ticket_id:null, ops_id:null, due:dt, note:null,
+    label:(l.name||"")+(l.co?" · "+l.co:""), owner:ME, assignees:[ME], snooze:true});
 };
 window.assignLead = async (id,v) => {
   if(!v) return;
@@ -3056,9 +3058,12 @@ window.newNoteFlow = () => {
     toast("Note saved ✓"); await loadData(true); render();
   });
 };
-/* ---------- unified reminders: one bell for people, tickets and operations ----------
-   The per-lead "⏰ Remind me…" select on cards is untouched: that one drives the
-   queue. These reminders are personal notes-to-self that surface under 🔔. */
+/* ---------- unified reminders (v35): ONE system for people, tickets, operations ----------
+   Every reminder lives in the reminders table with an audience (me, named
+   people, or the whole team) and lands under the 🔔 bell of everyone it is for.
+   A reminder on a lead can ALSO hide it from the follow-up queues until its
+   date ("snooze") — that effect writes people.next_due, which is queue
+   plumbing only and never appears in the bell by itself. */
 window.remFlow = () => {
   let ov=document.getElementById("mergeov"); if(ov) ov.remove();
   ov=document.createElement("div"); ov.id="mergeov";
@@ -3133,46 +3138,81 @@ window.remO = id => {
   const strip=s=>String(s||"").replace(/<[^>]*>/g,"");
   remDialog("ops",{ops_id:id}, it?strip(it.who)+" · "+it.title:id);
 };
+/* saves a reminder (any audience) and, when it snoozes a lead, also sets the
+   queue date people.next_due. One open snooze reminder per person per owner:
+   setting a new one replaces mine, never anyone else's. */
+window.remSave = async rec => {
+  if(rec.snooze && rec.person_id){
+    await sb.from("reminders").delete().eq("person_id",rec.person_id).eq("owner",ME).eq("snooze",true).is("done_at",null);
+    window.__rems=(window.__rems||[]).filter(r=>!(r.snooze&&r.person_id===rec.person_id&&r.owner===ME&&!r.done_at));
+  }
+  const {data,error}=await sb.from("reminders").insert(rec).select("*").single();
+  if(error){ hubAlert("Could not save the reminder", esc(error.message)); return null; }
+  (window.__rems=window.__rems||[]).push(data);
+  if(rec.snooze && rec.person_id){
+    const {error:e2}=await sb.from("people").update({next_due:rec.due}).eq("id",rec.person_id);
+    if(e2) hubAlert("Reminder saved, but hiding the lead failed", esc(e2.message));
+    const l=byId[rec.person_id]; if(l){ l.due=rec.due; derive(l); }
+    const p=(RAW.people||[]).find(x=>x.id===rec.person_id); if(p) p.next_due=rec.due;
+  }
+  toast("Reminder saved: "+day(rec.due).toLocaleDateString(undefined,{day:"numeric",month:"short"}));
+  render(false);
+  return data;
+};
+window.remAudRender = () => {
+  const el=document.getElementById("rem-aud"); if(!el) return;
+  const a=window.__remAud;
+  const chip=(on,txt,js)=>`<span class="chip" onclick="${js}" style="cursor:pointer;${on?"outline:2px solid var(--accent);":""}">${txt}</span>`;
+  el.innerHTML = chip(!a.team&&a.users.has(ME),"me","remAudUser('"+ME.replace(/'/g,"\\'")+"')")
+    + chip(a.team,"whole team","remAudTeam()")
+    + (window.__users||[]).filter(u=>u.email!==ME)
+        .map(u=>chip(!a.team&&a.users.has(u.email), esc(u.name||u.email.split("@")[0]),
+          "remAudUser('"+String(u.email).replace(/'/g,"\\'")+"')")).join("");
+};
+window.remAudTeam = () => { window.__remAud.team=!window.__remAud.team; remAudRender(); };
+window.remAudUser = em => { const a=window.__remAud; a.team=false;
+  if(a.users.has(em)) a.users.delete(em); else a.users.add(em);
+  if(!a.users.size) a.users.add(ME); remAudRender(); };
 window.remDialog = (kind, target, label) => {
   let ov=document.getElementById("mergeov"); if(ov) ov.remove();
   ov=document.createElement("div"); ov.id="mergeov";
   const d=new Date(TODAY); d.setDate(d.getDate()+1);
   const dflt=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+  window.__remAud={team:false, users:new Set([ME])};
   ov.innerHTML=`<div class="mcard"><h3>⏰ Reminder</h3>
     <div class="meta">${esc(label||"")}</div>
     <label class="chip">on <input class="li" id="rem-due" type="date" value="${dflt}" style="padding:2px 6px"></label>
-    <input class="li" id="rem-note" placeholder="What should future-you remember?">
+    <input class="li" id="rem-note" placeholder="What should be remembered?">
+    <div class="meta" style="margin-top:8px">Remind whom? It shows under their 🔔 bell.</div>
+    <div id="rem-aud" style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0"></div>
+    ${target.person_id?`<label class="chip" style="margin-top:6px"><input type="checkbox" id="rem-snz" ${target.snooze?"checked":""}> also hide this lead from the follow-up queues until then</label>`:""}
     <div class="acts" style="justify-content:flex-end">
       <button class="btn" onclick="document.getElementById('mergeov').remove()">Cancel</button>
       <button class="btn primary" id="rem-save">Save reminder</button>
     </div></div>`;
   ov.addEventListener("click",e=>{ if(e.target===ov) ov.remove(); });
   document.body.appendChild(ov);
+  remAudRender();
   ov.querySelector("#rem-note").focus();
   ov.querySelector("#rem-save").onclick=async()=>{
     const due=(document.getElementById("rem-due")||{}).value;
     const note=((document.getElementById("rem-note")||{}).value||"").trim();
     if(!due){ toast("Pick a date first"); return; }
+    const a=window.__remAud;
     const rec={kind, due, note:note||null, owner:ME, label:(label||"").slice(0,160)||null,
-      person_id:target.person_id||null, ticket_id:target.ticket_id||null, ops_id:target.ops_id||null};
-    const {data,error}=await sb.from("reminders").insert(rec).select("*").single();
-    if(error){ hubAlert("Could not save the reminder", esc(error.message)); return; }
-    (window.__rems=window.__rems||[]).push(data);
+      person_id:target.person_id||null, ticket_id:target.ticket_id||null, ops_id:target.ops_id||null,
+      assignees:a.team?["team"]:[...a.users],
+      snooze:!!(target.person_id&&(document.getElementById("rem-snz")||{}).checked)};
+    const data=await remSave(rec);
+    if(!data) return;
     const o2=document.getElementById("mergeov"); if(o2) o2.remove();
-    toast("Reminder saved: "+day(due).toLocaleDateString(undefined,{day:"numeric",month:"short"}));
-    render(false);
   };
 };
-/* one list for every manual reminder: rows from the reminders table PLUS the
-   person-card "⏰ Remind me…" dates (people.next_due). No stage filter here:
-   client payment reminders belong in the bell like everything set by hand. */
-window.remAll = () => {
-  const tbl=(window.__rems||[]).filter(r=>!r.done_at);
-  const nd=(typeof LEADS!=="undefined"?LEADS:[]).filter(l=>l.due && !l.internal)
-    .map(l=>({_nd:true, id:"nd:"+l.id, kind:"sales", due:l.due, note:null,
-      label:(l.name||"")+(l.co?" · "+l.co:""), person_id:l.id, ticket_id:null, ops_id:null}));
-  return [...tbl, ...nd].sort((a,b)=>String(a.due).localeCompare(String(b.due)));
-};
+/* ONE source since v35: the reminders table. RLS already scopes what arrives
+   here to mine + assigned-to-me + team-wide. The old card ⏰ dates were
+   migrated into it; people.next_due is only queue plumbing now. */
+window.remAll = () =>
+  (window.__rems||[]).filter(r=>!r.done_at).sort((a,b)=>String(a.due).localeCompare(String(b.due)));
 window.remList = () => {
   const rems=remAll();
   window.__remShown=rems;
@@ -3188,15 +3228,24 @@ window.remList = () => {
     if(r.person_id&&byId[r.person_id]) return byId[r.person_id].client?"client":"lead";
     return r.kind||"";
   };
+  // audience at a glance: team-wide, sent to others, or received from someone
+  const audR=r=>{
+    const a=r.assignees||[];
+    if(a.includes("team")) return "👥 team";
+    if(r.owner!==ME) return "from "+String(r.owner||"").split("@")[0];
+    const others=a.filter(e=>e!==ME);
+    return others.length ? "→ "+others.map(e=>String(e).split("@")[0]).join(", ") : "";
+  };
   const rowR=(r,i)=>{
     const dueD=day(r.due), isDue=dueD&&dueD<=TODAY;
     return `<div class="row" style="cursor:default;display:flex;align-items:center;gap:8px;padding:5px 0">
       <span class="meta ${isDue?'due':''}" style="min-width:64px">${dueD?dueD.toLocaleDateString(undefined,{day:"numeric",month:"short"}):esc(r.due)}</span>
       ${lblR(r)?`<span class="chip" style="flex:none">${esc(lblR(r))}</span>`:""}
+      ${audR(r)?`<span class="chip" style="flex:none">${esc(audR(r))}</span>`:""}
       <span style="flex:1">${KI[r.kind]||"⏰"} ${esc(tgt(r))}${r.note?` <span class="meta">${esc(r.note)}</span>`:""}</span>
       ${(r.person_id&&byId[r.person_id])||r.ticket_id||r.ops_id?`<button class="btn" onclick="remGo(${i})" title="Open what this is about">→</button>`:""}
-      <button class="btn" onclick="remDone(${i})" title="${r._nd?"Done: clears the ⏰ date on the person card":"Done: it leaves the bell"}">✓</button>
-      ${r._nd?"":`<button class="btn" onclick="remDel(${i})" title="Delete without marking done">🗑</button>`}</div>`;
+      <button class="btn" onclick="remDone(${i})" title="Done: it leaves the bell${r.snooze?" and the lead returns to the queues":""}">✓</button>
+      ${r.owner===ME?`<button class="btn" onclick="remDel(${i})" title="Delete without marking done">🗑</button>`:""}</div>`;
   };
   const due=rems.map((r,i)=>({r,i})).filter(x=>day(x.r.due)&&day(x.r.due)<=TODAY);
   const later=rems.map((r,i)=>({r,i})).filter(x=>!(day(x.r.due)&&day(x.r.due)<=TODAY));
@@ -3220,19 +3269,19 @@ window.remGo = i => {
 };
 window.remDone = async i => {
   const r=(window.__remShown||[])[i]; if(!r) return;
-  if(r._nd){                                   // card ⏰ reminder: done = clear the date
-    const {error}=await sb.from("people").update({next_due:null}).eq("id",r.person_id);
-    if(error){ hubAlert("Failed", esc(error.message)); return; }
-    const l=(typeof LEADS!=="undefined"?LEADS:[]).find(x=>x.id===r.person_id);
-    if(l){ l.due=null; derive(l); }
-    const p=(RAW.people||[]).find(x=>x.id===r.person_id); if(p) p.next_due=null;
-    toast("Done ✓"); render(false); remList();
-    return;
-  }
   const now=new Date().toISOString();
-  const {error}=await sb.from("reminders").update({done_at:now}).eq("id",r.id);
+  const {error}=await sb.from("reminders").update({done_at:now, done_by:ME}).eq("id",r.id);
   if(error){ hubAlert("Failed", esc(error.message)); return; }
-  r.done_at=now; toast("Done ✓"); render(false); remList();
+  r.done_at=now;
+  if(r.snooze && r.person_id){                 // done = the lead rejoins the queues
+    const l=byId[r.person_id];
+    if(l && String(l.due||"")===String(r.due).slice(0,10)){
+      await sb.from("people").update({next_due:null}).eq("id",r.person_id);
+      l.due=null; derive(l);
+      const p=(RAW.people||[]).find(x=>x.id===r.person_id); if(p) p.next_due=null;
+    }
+  }
+  toast("Done ✓"); render(false); remList();
 };
 window.remDel = async i => {
   const r=(window.__remShown||[])[i]; if(!r) return;
